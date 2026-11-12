@@ -47,6 +47,16 @@ adb shell am start -n com.cardoctor.demo/.MainActivity
 
 에뮬레이터의 Virtual Console(포트 8088)에 고장을 주입합니다.
 
+**GUI 도구 (권장)**: 버튼으로 시나리오와 개별 고장을 주입하고, 차량이 실제로 보고하는 경고등을 실시간으로 봅니다.
+앱 실행과 화면 캡처 버튼도 있습니다. Python 3.9 이상과 `adb`만 있으면 되고 추가 패키지는 필요 없습니다.
+
+```
+python tools/demo_console.py
+```
+
+**명령줄**:
+Windows의 `cmd`나 PowerShell에서는 `scripts\demo.cmd headlamp` 처럼 `demo.cmd`를, Git Bash·macOS·Linux에서는 아래의 `demo.sh`를 씁니다. 인자는 같습니다.
+
 ```bash
 scripts/demo.sh headlamp    # 전조등 이상. 낮 1등급 → 앱에서 '낮' 칩을 눌러 '밤'으로 바꾸면 3등급
 scripts/demo.sh tire-rain   # 타이어 공기압 경고 + 와이퍼 작동(비) → 3등급
@@ -57,6 +67,17 @@ scripts/demo.sh steering    # 조향 보조(MDPS) 경고 → 3등급
 scripts/demo.sh airbag      # 에어백 경고 → 2등급
 scripts/demo.sh clear       # 원상 복구
 ```
+
+## 시연 제어판 (디버그 빌드)
+
+상단의 **DEMO** 버튼을 누르면 화면 아래에 제어판이 열립니다.
+
+- **FAULT INJECTION**: 스위치를 누르면 에뮬레이터의 Virtual Console(`http://127.0.0.1:8088`)로 고장을 주입합니다.
+  스위치의 켜짐 표시는 요청한 값이 아니라 차량이 실제로 보고한 값입니다. 신호가 SDK를 거쳐 돌아와야 불이 들어옵니다.
+- **LIVE MONITOR**: 주입 요청 → SDK로 읽힌 신호(주입 후 걸린 시간 포함) → 엔진의 판정과 근거 → 종합 등급 변화를 시간순으로 보여줍니다.
+  `scripts/demo.sh` 나 낮/밤 칩으로 바꾼 것도 같은 목록에 기록됩니다.
+
+제어판과 네트워크 권한은 디버그 빌드에만 들어갑니다. 릴리스 빌드에는 DEMO 버튼도, 인터넷 권한도 없습니다.
 
 ## 디자인
 

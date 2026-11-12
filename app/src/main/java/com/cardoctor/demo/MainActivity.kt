@@ -21,7 +21,10 @@ class MainActivity : ComponentActivity() {
                 onCycleNight = viewModel::cycleNight,
                 onCycleWeather = viewModel::cycleWeather,
                 onToggleHighway = viewModel::toggleHighway,
-                onToggleLongDistance = viewModel::toggleLongDistance
+                onToggleLongDistance = viewModel::toggleLongDistance,
+                onToggleDemo = viewModel::toggleDemo,
+                onInject = viewModel::inject,
+                onClearAllFaults = viewModel::clearAllFaults
             )
         }
     }

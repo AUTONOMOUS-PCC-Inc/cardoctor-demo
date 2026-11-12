@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cardoctor.demo.Override
 import com.cardoctor.demo.UiState
+import com.cardoctor.demo.demo.DemoFault
 import com.cardoctor.demo.engine.CarPart
 import com.cardoctor.demo.engine.Diagnosis
 import com.cardoctor.demo.engine.Environment
@@ -59,7 +60,10 @@ fun DashboardScreen(
     onCycleNight: () -> Unit,
     onCycleWeather: () -> Unit,
     onToggleHighway: () -> Unit,
-    onToggleLongDistance: () -> Unit
+    onToggleLongDistance: () -> Unit,
+    onToggleDemo: () -> Unit,
+    onInject: (DemoFault, Boolean) -> Unit,
+    onClearAllFaults: () -> Unit
 ) {
     val grade = state.report.overallGrade
     val waiting = state.snapshot.telltales == null
@@ -106,7 +110,7 @@ fun DashboardScreen(
         Column(
             Modifier.fillMaxSize().padding(start = 60.dp, end = 60.dp, top = 36.dp, bottom = 30.dp)
         ) {
-            TopBar(state, onCycleNight, onCycleWeather, onToggleHighway, onToggleLongDistance)
+            TopBar(state, onCycleNight, onCycleWeather, onToggleHighway, onToggleLongDistance, onToggleDemo)
             Spacer(Modifier.height(28.dp))
             Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.Hairline))
             Spacer(Modifier.height(28.dp))
@@ -119,6 +123,9 @@ fun DashboardScreen(
                 ) {
                     OverallCard(grade, waiting, ambient)
                     FaultList(state, Modifier.weight(1f))
+                    if (state.demo.open) {
+                        DemoPanel(state, onInject, onClearAllFaults, Modifier.height(330.dp))
+                    }
                 }
             }
 
@@ -134,7 +141,8 @@ private fun TopBar(
     onCycleNight: () -> Unit,
     onCycleWeather: () -> Unit,
     onToggleHighway: () -> Unit,
-    onToggleLongDistance: () -> Unit
+    onToggleLongDistance: () -> Unit,
+    onToggleDemo: () -> Unit
 ) {
     val env = state.environment
     val controls = state.controls
@@ -148,7 +156,23 @@ private fun TopBar(
             Text("지금 정비소에 가야 할까요", style = Type.body(22, Palette.TextSecondary))
         }
         Spacer(Modifier.weight(1f))
-        Text("DRIVING CONTEXT", style = Type.Eyebrow.copy(fontSize = 16.sp))
+        if (state.demo.available) {
+            // Debug builds: the label gives way to the demo console switch.
+            val shape = RoundedCornerShape(24.dp)
+            val on = state.demo.open
+            Box(
+                Modifier
+                    .clip(shape)
+                    .background(if (on) Palette.Accent.copy(alpha = 0.2f) else Color.Transparent)
+                    .border(1.5.dp, if (on) Palette.Accent else Color.White.copy(alpha = 0.2f), shape)
+                    .clickable(onClick = onToggleDemo)
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
+            ) {
+                Text("DEMO", style = Type.Eyebrow.copy(fontSize = 15.sp, color = if (on) Palette.Accent else Palette.TextSecondary))
+            }
+        } else {
+            Text("DRIVING CONTEXT", style = Type.Eyebrow.copy(fontSize = 16.sp))
+        }
         Spacer(Modifier.width(24.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             EnvChip(
