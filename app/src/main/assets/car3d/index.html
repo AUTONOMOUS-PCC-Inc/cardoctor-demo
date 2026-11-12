@@ -1,0 +1,428 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  canvas { display: block; position: fixed; left: 0; top: 0; touch-action: none; }
+</style>
+<script type="importmap">
+  { "imports": { "three": "./three.module.min.js" } }
+</script>
+</head>
+<body>
+<script type="module">
+/*
+ * CarDoctor 3D viewer.
+ *
+ * Car model: "Hyundai Ioniq 5 - Lowpoly" by andikapratamaw, CC-BY-4.0
+ * (https://sketchfab.com/3d-models/hyundai-ioniq-5-lowpoly-675e78311e8440d88714bd212cb7a8fb).
+ * See ioniq5/license.txt.
+ *
+ * Scene axes: +x = front, +y = up, +z = right-hand side of the car. Units are metres.
+ *
+ * The app calls  window.setCarState({ parts: { TIRES: 3, ... }, ambient: "#rrggbb" })
+ * where the number is the grade (1-4) of each faulty part. Healthy parts are omitted.
+ */
+import * as THREE from 'three';
+import { GLTFLoader } from './jsm/loaders/GLTFLoader.js';
+
+function report(ok) { try { window.Android && window.Android.onReady(ok); } catch (e) {} }
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setClearColor(0x000000, 0);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+const view = renderer.domElement;
+document.body.appendChild(view);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+
+// ---- Studio environment: a dark room with strip lights, used only for reflections ----
+(function buildEnvironment() {
+  const env = new THREE.Scene();
+  const room = new THREE.Mesh(
+    new THREE.BoxGeometry(30, 14, 30),
+    new THREE.MeshBasicMaterial({ color: 0x0b0d11, side: THREE.BackSide })
+  );
+  room.position.y = 6;
+  env.add(room);
+  function panel(w, h, x, y, z, rx, ry, power) {
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, h),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(power, power, power * 1.04), side: THREE.DoubleSide })
+    );
+    m.position.set(x, y, z); m.rotation.set(rx, ry, 0);
+    env.add(m);
+  }
+  panel(11, 0.9, 0, 6.5, -2.6, Math.PI / 2, 0, 14);   // overhead strips
+  panel(11, 0.9, 0, 6.5, 2.6, Math.PI / 2, 0, 14);
+  panel(7, 0.5, 0, 6.8, 0, Math.PI / 2, 0, 8);
+  panel(13, 3.4, 0, 2.4, -9, 0, 0, 5.5);              // side soft boxes
+  panel(13, 3.4, 0, 2.4, 9, 0, Math.PI, 5.5);
+  panel(4, 2.4, 10, 3.0, 0, 0, -Math.PI / 2, 3.0);    // front
+  panel(4, 2.0, -10, 3.0, 0, 0, Math.PI / 2, 1.6);    // rear
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(env, 0.03).texture;
+  pmrem.dispose();
+})();
+
+scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x0a0c10, 0.6));
+const key = new THREE.DirectionalLight(0xffffff, 1.4);
+key.position.set(3, 7, 4);
+scene.add(key);
+
+// ---- Helpers ----
+function radialTexture(stops) {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+  stops.forEach(s => grad.addColorStop(s[0], s[1]));
+  g.fillStyle = grad; g.fillRect(0, 0, 256, 256);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const glowTexture = radialTexture([[0, 'rgba(255,255,255,1)'], [0.25, 'rgba(255,255,255,0.45)'], [1, 'rgba(255,255,255,0)']]);
+
+// ---- Floor ----
+const floor = new THREE.Mesh(
+  new THREE.CircleGeometry(7, 96),
+  new THREE.MeshStandardMaterial({
+    color: 0x050608, metalness: 0.7, roughness: 0.38, transparent: true, envMapIntensity: 0.55, depthWrite: false,
+    alphaMap: radialTexture([[0, '#fff'], [0.3, '#fff'], [0.62, '#000'], [1, '#000']])
+  })
+);
+floor.rotation.x = -Math.PI / 2;
+scene.add(floor);
+
+const rings = [[2.95, 0.016, 1], [3.5, 0.01, 0.5], [4.05, 0.008, 0.25]].map(r => {
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(r[0], r[0] + r[1], 160),
+    new THREE.MeshBasicMaterial({ color: 0x63e0c6, transparent: true, opacity: 0.55 * r[2], side: THREE.DoubleSide })
+  );
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.004;
+  scene.add(ring);
+  return ring;
+});
+
+const shadow = new THREE.Mesh(
+  new THREE.PlaneGeometry(6.6, 3.4),
+  new THREE.MeshBasicMaterial({
+    map: radialTexture([[0, 'rgba(0,0,0,0.95)'], [0.55, 'rgba(0,0,0,0.8)'], [1, 'rgba(0,0,0,0)']]),
+    transparent: true, depthWrite: false
+  })
+);
+shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.008;
+scene.add(shadow);
+
+// Ambient pool of light on the floor around the car, in the colour of the overall state.
+const ambientPool = new THREE.Mesh(
+  new THREE.PlaneGeometry(9, 6.4),
+  new THREE.MeshBasicMaterial({
+    map: glowTexture, color: 0x63e0c6, transparent: true, opacity: 0.2,
+    blending: THREE.AdditiveBlending, depthWrite: false
+  })
+);
+ambientPool.rotation.x = -Math.PI / 2; ambientPool.position.y = 0.006;
+scene.add(ambientPool);
+
+// ---- Car ----
+const car = new THREE.Group();
+scene.add(car);
+
+// name -> { materials: [...], sprites: [...], meshes: [...], light, healthy, paint }
+const parts = {};
+function part(name) { return parts[name] || (parts[name] = { materials: [], sprites: [], meshes: [], light: null }); }
+function glowSprite(name, x, y, z, size) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTexture, color: 0xffffff, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false
+  }));
+  s.position.set(x, y, z); s.scale.set(size, size, 1);
+  car.add(s);
+  part(name).sprites.push(s);
+}
+function partLight(name, x, y, z, range) {
+  const l = new THREE.PointLight(0xffffff, 0, range, 2);
+  l.position.set(x, y, z);
+  car.add(l);
+  part(name).light = l;
+}
+function overlayMaterial() {
+  return new THREE.MeshBasicMaterial({ color: 0xff4d57, transparent: true, opacity: 0, depthWrite: false });
+}
+
+let paint = null;
+
+new GLTFLoader().load('ioniq5/scene.gltf', gltf => {
+  // The model faces +z; turn it to face +x, centre it and stand it on the floor.
+  const holder = new THREE.Group();
+  holder.rotation.y = Math.PI / 2;
+  holder.add(gltf.scene);
+  car.add(holder);
+  car.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(holder);
+  const centre = box.getCenter(new THREE.Vector3());
+  holder.position.set(-centre.x, -box.min.y, -centre.z);
+  car.updateMatrixWorld(true);
+
+  // Sort the model's meshes by what they are.
+  const bodyMeshes = [], tyreMeshes = [], rimMeshes = [];
+  let lampMesh = null, tyreMaterial = null, rimMaterial = null;
+  gltf.scene.traverse(o => {
+    if (!o.isMesh) return;
+    const material = o.material.name;
+    let wheel = false;
+    for (let p = o.parent; p; p = p.parent) { if (p.name && p.name.indexOf('SM_Wheel') === 0) wheel = true; }
+    if (wheel && material === 'M_Tires') {
+      tyreMaterial = tyreMaterial || o.material.clone();
+      o.material = tyreMaterial; tyreMeshes.push(o);
+    } else if (wheel) {
+      rimMaterial = rimMaterial || o.material.clone();
+      o.material = rimMaterial; rimMeshes.push(o);
+    } else {
+      bodyMeshes.push(o);
+      if (material === 'M_Emission') lampMesh = o;
+      if (material === 'M_Gravity_Gold_Matte') {
+        // Same colour as the model, with a clear-coated metallic finish.
+        paint = paint || new THREE.MeshPhysicalMaterial({
+          color: o.material.color, metalness: 0.6, roughness: 0.36, clearcoat: 0.8, clearcoatRoughness: 0.18,
+          envMapIntensity: 1.25
+        });
+        o.material = paint;
+      }
+    }
+  });
+
+  // ---- Placing details on the skin by ray casting ----
+  const raycaster = new THREE.Raycaster();
+  function hit(ox, oy, oz, dx, dy, dz) {
+    const dir = new THREE.Vector3(dx, dy, dz).normalize();
+    raycaster.set(new THREE.Vector3(ox, oy, oz), dir);
+    const h = raycaster.intersectObjects(bodyMeshes, false)[0];
+    if (!h) return null;
+    const n = h.face.normal.clone().transformDirection(h.object.matrixWorld);
+    if (n.dot(dir) > 0) n.negate();
+    return { p: h.point.clone(), n };
+  }
+  /** Puts mesh on the surface at h, its local +z along the surface normal. */
+  function attach(mesh, h, lift, upX) {
+    if (!h) return null;
+    if (upX) mesh.up.set(1, 0, 0);
+    mesh.position.copy(h.p).addScaledVector(h.n, lift);
+    mesh.lookAt(h.p.clone().addScaledVector(h.n, lift + 1));
+    car.add(mesh);
+    return mesh;
+  }
+
+  // Tyres and wheels: the model's own meshes light up.
+  if (tyreMaterial) {
+    tyreMaterial.emissive = new THREE.Color(0x000000);
+    part('TIRES').materials.push(tyreMaterial);
+    part('TIRES').strength = 0.4;
+  }
+  if (rimMaterial) {
+    rimMaterial.emissive = new THREE.Color(0x000000);
+    part('BRAKES').materials.push(rimMaterial);
+  }
+  tyreMeshes.forEach(m => {
+    const p = m.getWorldPosition(new THREE.Vector3());
+    const out = Math.sign(p.z) * 0.22;
+    glowSprite('TIRES', p.x, p.y, p.z + out, 1.6);
+    glowSprite('BRAKES', p.x, p.y, p.z + out, 1.0);
+  });
+  partLight('TIRES', 0, 2.2, 0, 6);
+  partLight('BRAKES', 0, 2.2, 0, 6);
+
+  // Headlamps: the model's emissive mesh, white when healthy.
+  if (lampMesh) {
+    const lampMaterial = new THREE.MeshStandardMaterial({ color: 0x15171a, emissive: 0xeaf3ff, emissiveIntensity: 2.2 });
+    lampMesh.material = lampMaterial;
+    part('HEADLAMPS').materials.push(lampMaterial);
+    part('HEADLAMPS').healthy = { color: 0xeaf3ff, intensity: 2.2 };
+    const lb = new THREE.Box3().setFromObject(lampMesh);
+    const ly = (lb.min.y + lb.max.y) / 2;
+    [-1, 1].forEach(side => glowSprite('HEADLAMPS', lb.max.x + 0.08, ly, side * (lb.max.z - 0.2), 1.25));
+    partLight('HEADLAMPS', lb.max.x + 0.6, ly, 0, 4);
+  }
+
+  // Wipers: the model has none, so two bars are laid at the base of the windscreen.
+  const wiperMaterial = new THREE.MeshStandardMaterial({ color: 0x0a0b0d, metalness: 0.3, roughness: 0.6, emissive: 0x000000 });
+  part('WIPERS').materials.push(wiperMaterial);
+  [-0.32, 0.28].forEach(z => {
+    attach(new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.022, 0.022), wiperMaterial), hit(0.86, 3, z, 0, -1, 0), 0.006, true);
+  });
+  glowSprite('WIPERS', 0.75, 1.3, 0, 1.9);
+  partLight('WIPERS', 1.0, 1.6, 0, 3);
+
+  // Drive unit / cooling: a soft heat patch lying on the bonnet.
+  // Normal (not additive) blending, so the colour stays saturated on the light paint.
+  const motorMaterial = new THREE.MeshBasicMaterial({
+    color: 0xff4d57, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide,
+    // alphaMap reads brightness, so this one fades from white (opaque) to black (clear).
+    alphaMap: radialTexture([[0, '#ddd'], [0.45, '#777'], [1, '#000']])
+  });
+  const patch = attach(new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.5), motorMaterial), hit(1.65, 3, 0, 0, -1, 0), 0.03, true);
+  if (patch) part('MOTOR').meshes.push(patch);
+  part('MOTOR').strength = 0.5;
+  glowSprite('MOTOR', 1.65, 1.1, 0, 1.6);
+
+  // Battery pack: glowing slab under the floor plus light lines along both sills.
+  const batteryMaterial = overlayMaterial();
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.04, 1.4), batteryMaterial);
+  slab.position.set(0, 0.2, 0);
+  car.add(slab);
+  part('BATTERY').meshes.push(slab);
+  part('BATTERY').strength = 0.5;
+  [-1, 1].forEach(side => {
+    for (let sx = -0.8; sx <= 0.801; sx += 0.2) {
+      const seg = attach(new THREE.Mesh(new THREE.BoxGeometry(0.205, 0.035, 0.02), batteryMaterial), hit(sx, 0.36, side * 3, 0, 0, -side), 0.006);
+      if (seg) part('BATTERY').meshes.push(seg);
+    }
+    glowSprite('BATTERY', 0, 0.38, side * 1.05, 2.4);
+  });
+  partLight('BATTERY', 0, 2.2, 0, 6);
+
+  // Cabin safety (airbag) and steering (left-hand drive): no interior in the model, so glow only.
+  glowSprite('CABIN', -0.1, 1.3, 0, 2.8);
+  partLight('CABIN', -0.1, 1.9, 0, 3.5);
+  glowSprite('STEERING', 0.45, 1.15, -0.38, 1.5);
+  partLight('STEERING', 0.5, 1.7, -0.5, 3);
+
+  // Whole-vehicle warning tints the paint.
+  part('WHOLE').paint = true;
+
+  report(true);
+}, undefined, error => {
+  console.error('model load failed: ' + (error && error.message ? error.message : error));
+  report(false);
+});
+
+// Where the camera turns to show each part: [azimuth, elevation].
+const FOCUS = {
+  HEADLAMPS: [0.42, 0.22], WIPERS: [0.5, 0.42], MOTOR: [0.55, 0.45], TIRES: [1.05, 0.2],
+  BRAKES: [1.05, 0.2], BATTERY: [1.3, 0.16], CABIN: [0.95, 0.5], STEERING: [-0.75, 0.5]
+};
+const COLORS = { 1: 0xf5b94a, 2: 0xf5b94a, 3: 0xff4d57, 4: 0xff4d57 };
+
+// ---- State ----
+let state = {};           // part -> grade
+let focusKey = '';
+window.setCarState = function (next) {
+  state = (next && next.parts) || {};
+  if (next && next.ambient) {
+    const c = new THREE.Color(next.ambient);
+    ambientPool.material.color.copy(c);
+    rings.forEach(r => r.material.color.copy(c));
+  }
+  // Turn towards the most severe part when the set of faults changes.
+  const names = Object.keys(state).sort((a, b) => state[b] - state[a]);
+  const key = names.join(',');
+  if (key !== focusKey) {
+    focusKey = key;
+    const target = names.length && FOCUS[names[0]];
+    if (target) orbit.focus(target[0], target[1]);
+  }
+};
+
+function applyState(time) {
+  const pulse = 0.35 + 0.65 * Math.abs(Math.sin(time * 4.2));
+  Object.keys(parts).forEach(name => {
+    const p = parts[name];
+    const grade = state[name] || 0;
+    const k = grade === 0 ? 0 : (grade === 4 ? pulse : 1);
+    const color = COLORS[grade] || 0xffffff;
+    p.materials.forEach(m => {
+      if (grade === 0) {
+        if (p.healthy) { m.emissive.setHex(p.healthy.color); m.emissiveIntensity = p.healthy.intensity; }
+        else { m.emissive.setHex(0x000000); m.emissiveIntensity = 0; }
+      } else {
+        m.emissive.setHex(color); m.emissiveIntensity = 1.5 * k * (p.strength || 1);
+      }
+    });
+    p.meshes.forEach(mesh => { mesh.material.color.setHex(color); mesh.material.opacity = 0.9 * k; });
+    p.sprites.forEach(s => { s.material.color.setHex(color); s.material.opacity = 0.42 * k * (p.strength || 1); });
+    if (p.light) { p.light.color.setHex(color); p.light.intensity = 6 * k; }
+    if (p.paint && paint) {
+      paint.emissive.setHex(grade ? color : 0x000000);
+      paint.emissiveIntensity = 0.12 * k;
+    }
+  });
+}
+
+// ---- Orbit camera: slow auto-rotation, drag to look around ----
+const orbit = (function () {
+  const radius = 10.2, restElevation = 0.34;
+  let azimuth = 0.75, elevation = 0.34;
+  let goalAz = null, goalEl = null, idleUntil = 0, dragging = false, lastX = 0, lastY = 0;
+  view.addEventListener('pointerdown', e => {
+    dragging = true; lastX = e.clientX; lastY = e.clientY; goalAz = goalEl = null;
+    view.setPointerCapture && view.setPointerCapture(e.pointerId);
+  });
+  view.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    azimuth -= (e.clientX - lastX) * 0.008;
+    elevation = Math.max(0.08, Math.min(1.2, elevation + (e.clientY - lastY) * 0.005));
+    lastX = e.clientX; lastY = e.clientY;
+  });
+  function end() { dragging = false; idleUntil = performance.now() + 4000; }
+  view.addEventListener('pointerup', end);
+  view.addEventListener('pointercancel', end);
+
+  function shortest(from, to) {
+    let d = (to - from) % (Math.PI * 2);
+    if (d > Math.PI) d -= Math.PI * 2;
+    if (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  }
+  return {
+    focus(az, elv) { goalAz = az; goalEl = elv; idleUntil = performance.now() + 7000; },
+    update(dt) {
+      if (goalAz !== null && !dragging) {
+        const d = shortest(azimuth, goalAz);
+        azimuth += d * Math.min(1, dt * 2.2);
+        elevation += (goalEl - elevation) * Math.min(1, dt * 2.2);
+        if (Math.abs(d) < 0.005) { goalAz = goalEl = null; }
+      } else if (!dragging && performance.now() > idleUntil) {
+        azimuth += dt * 0.12;
+        elevation += (restElevation - elevation) * Math.min(1, dt * 0.6);
+      }
+      const c = Math.cos(elevation);
+      const r = radius * (camera.aspect < 1 ? 0.77 / Math.max(camera.aspect, 0.5) : 1);
+      camera.position.set(r * c * Math.cos(azimuth), 0.7 + r * Math.sin(elevation), r * c * Math.sin(azimuth));
+      camera.lookAt(0, 0.68, 0);
+    }
+  };
+})();
+
+let lastW = 0, lastH = 0;
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  if (!w || !h || (w === lastW && h === lastH)) return;
+  lastW = w; lastH = h;
+  // Explicit CSS pixels: percentage heights resolve to 0 in this WebView.
+  renderer.setSize(w, h, true);
+  camera.aspect = w / h;
+  camera.fov = camera.aspect < 1 ? 38 : 30;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+const clock = new THREE.Clock();
+function frame() {
+  const dt = Math.min(clock.getDelta(), 0.1);
+  resize();   // the WebView may be laid out after the page loads
+  orbit.update(dt);
+  applyState(clock.elapsedTime);
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
+</body>
+</html>

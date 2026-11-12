@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Pleos Vehicle Service read permissions (protectionLevel="normal"). -->
+    <uses-permission android:name="pleos.car.permission.CAR_SAFETY" />
+    <uses-permission android:name="pleos.car.permission.CAR_LIGHTS" />
+    <uses-permission android:name="pleos.car.permission.READ_WINDSHIELD_WIPERS" />
+    <uses-permission android:name="pleos.car.permission.CAR_WINDOWS" />
+
+    <!--
+        Safety.getTelltalesInfo() fails with SecurityException without this one.
+        It is "normal" on the Pleos Connect v2.1 emulator image; whether third-party apps may
+        use it on real vehicles is still to be confirmed with the contest organizers.
+    -->
+    <uses-permission android:name="pleos.car.permission.PRIVATE_CAR_SAFETY" />
+
+    <application
+        android:allowBackup="false"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.CarDoctor">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="landscape">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>
