@@ -23,7 +23,7 @@ import kotlinx.coroutines.flow.SharedFlow
 sealed interface DemoCommand {
     data class Tire(val wheel: Wheel, val low: Boolean) : DemoCommand
     data object ClearTires : DemoCommand
-    /** key: night | weather | driving (value auto|on|off), highway | long (value on|off). */
+    /** key: night | weather | driving | highway | long, value: auto | on | off. */
     data class Env(val key: String, val value: String) : DemoCommand
     data object LockEnvironment : DemoCommand
     data object ResetEnvironment : DemoCommand

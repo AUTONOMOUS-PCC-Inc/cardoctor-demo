@@ -184,8 +184,10 @@ private fun TopBar(state: UiState, actions: DashboardActions) {
                 text = if (env.driving) "주행 중" else "정차",
                 detail = when {
                     controls.driving != Override.AUTO -> controls.driving.suffix
-                    state.snapshot.gear != null -> "기어 ${gearLetter(state.snapshot.gear)}"
-                    else -> "기어 신호"
+                    else -> listOfNotNull(
+                        state.snapshot.gear?.let { "기어 ${gearLetter(it)}" },
+                        state.drive.speedKmh?.let { "${it.toInt()}km/h" }
+                    ).joinToString(" · ").ifEmpty { "기어 신호" }
                 },
                 active = env.driving,
                 forced = controls.driving != Override.AUTO,
@@ -212,16 +214,25 @@ private fun TopBar(state: UiState, actions: DashboardActions) {
             )
             EnvChip(
                 text = if (env.highway) "고속도로" else "일반도로",
-                detail = "수동",
+                detail = when {
+                    controls.highway != Override.AUTO -> controls.highway.suffix
+                    state.drive.roadSpeedLimit != null -> "제한 ${state.drive.roadSpeedLimit}km/h"
+                    state.drive.speedKmh != null -> "속도 기준"
+                    else -> "내비 신호"
+                },
                 active = env.highway,
-                forced = false,
+                forced = controls.highway != Override.AUTO,
                 onClick = onToggleHighway
             )
             EnvChip(
                 text = if (env.longDistance) "50km 이상" else "근거리",
-                detail = "남은 거리",
+                detail = when {
+                    controls.longDistance != Override.AUTO -> controls.longDistance.suffix
+                    state.drive.remainMeters != null -> "남은 ${"%.0f".format(state.drive.remainMeters / 1000.0)}km"
+                    else -> "경로 없음"
+                },
                 active = env.longDistance,
-                forced = false,
+                forced = controls.longDistance != Override.AUTO,
                 onClick = onToggleLongDistance
             )
         }

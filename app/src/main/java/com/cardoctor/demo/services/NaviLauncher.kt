@@ -23,20 +23,29 @@ class NaviLauncher(context: Context) {
     private val _status = MutableStateFlow<String?>(null)
     val status: StateFlow<String?> = _status
 
+    /** Road speed limit and distance left on the route, for the automatic driving context. */
+    private val _drive = MutableStateFlow(com.cardoctor.demo.engine.DriveSignals())
+    val drive: StateFlow<com.cardoctor.demo.engine.DriveSignals> = _drive
+
     private val listener = object : NaviHelperEventListener {
         override fun onDrivingInfo(info: DrivingInfo) {
             info.destination?.let { d ->
                 _status.value = "안내 중 · ${d.name} · 남은 거리 ${"%.1f".format(d.distance / 1000.0)}km"
+                _drive.value = _drive.value.copy(remainMeters = d.distance.toInt())
             }
+        }
+        override fun onCurrentRoadSpeedLimit(limit: Int) {
+            _drive.value = _drive.value.copy(roadSpeedLimit = limit.takeIf { it > 0 })
         }
         override fun onRouteStarted(info: ai.pleos.playground.navi.data.RouteStartInfo) {
             _status.value = "안내 시작 · ${info.name}"
         }
         override fun onDestinationArrived(info: ai.pleos.playground.navi.data.DestinationArrivedInfo) {
             _status.value = "목적지에 도착했습니다"
+            _drive.value = _drive.value.copy(remainMeters = null)
         }
-        override fun onRouteEnded() { _status.value = null }
-        override fun onRouteCancelled() { _status.value = null }
+        override fun onRouteEnded() { _status.value = null; _drive.value = _drive.value.copy(remainMeters = null) }
+        override fun onRouteCancelled() { _status.value = null; _drive.value = _drive.value.copy(remainMeters = null) }
         override fun onError(code: NaviErrorCode) { _status.value = "내비 오류: ${code.name}" }
     }
 

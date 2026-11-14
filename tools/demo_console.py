@@ -77,9 +77,9 @@ WHEELS = [("앞 왼쪽", "LEFT_FRONT"), ("앞 오른쪽", "RIGHT_FRONT"), ("뒤 
 # 앱의 VoiceCommands.SAMPLES 순서와 같아야 한다 (adb로 한글을 넘기기 어려워 번호로 보낸다).
 VOICE_SAMPLES = ["지금 정비소 가야 돼?", "왜 위험해?", "정비소 안내해줘", "리포트 보여줘"]
 
-# 3단 전환: 자동 → 강제 ON → 강제 OFF → 자동
-ENV_TRISTATE = [("driving", "주행", "정차"), ("night", "밤", "낮"), ("weather", "비·눈", "맑음")]
-ENV_SWITCH = [("highway", "고속도로"), ("long", "50km 이상")]
+# 누를 때마다 자동 → 강제 ON → 강제 OFF → 자동. 자동이면 앱이 차량·내비·날씨 신호로 정합니다.
+ENV_TRISTATE = [("driving", "주행", "정차"), ("night", "밤", "낮"), ("weather", "비·눈", "맑음"),
+                ("highway", "고속도로", "일반도로"), ("long", "50km+", "근거리")]
 APP_LOG_KINDS = {"INJECT": "주입", "SIGNAL": "신호", "JUDGE": "판정", "ENVIRONMENT": "환경", "OVERALL": "종합"}
 
 # ---- palette (same as the app's ui/Palette.kt) ----
@@ -228,7 +228,7 @@ class DemoConsoleApp(tk.Tk):
         self.wiper_mode = "Off"
         self.entries: list[tuple[str, str, str]] = []   # (time, kind, text)
         self.low_tires: set[str] = set()                 # app-side values sent from here
-        self.env = {"driving": "auto", "night": "auto", "weather": "auto", "highway": "off", "long": "off"}
+        self.env = {key: "auto" for key, _, _ in ENV_TRISTATE}
         self.closing = False
         self.render_pending = False
 
@@ -408,19 +408,13 @@ class DemoConsoleApp(tk.Tk):
         shown = {"auto": "자동", "on": f"{on_label} (강제)", "off": f"{off_label} (강제)"}[value]
         self._send_app(f"{on_label}/{off_label} → {shown}", "env", key=key, value=value)
 
-    def toggle_env(self, key: str, label: str) -> None:
-        value = "off" if self.env[key] == "on" else "on"
-        self.env[key] = value
-        self.request_render()
-        self._send_app(f"{label} {'켬' if value == 'on' else '끔'}", "env", key=key, value=value)
-
     def lock_env(self) -> None:
         self.env.update(night="off", weather="off", highway="off", long="off")
         self.request_render()
         self._send_app("시연 환경 고정 (낮 · 맑음)", "env_lock")
 
     def reset_env(self) -> None:
-        self.env = {key: ("auto" if key in ("driving", "night", "weather") else "off") for key in self.env}
+        self.env = {key: "auto" for key in self.env}
         self.request_render()
         self._send_app("주행 환경 자동 복귀", "env_reset")
 
@@ -782,16 +776,14 @@ class DemoConsoleApp(tk.Tk):
         for index, (key, on_label, off_label) in enumerate(ENV_TRISTATE):
             value = self.env[key]
             label = {"auto": f"{on_label}/{off_label} 자동", "on": f"{on_label} · 강제", "off": f"{off_label} · 강제"}[value]
-            px = left + index * (third + 8)
-            self._toggle_pill(px, cy, px + third, cy + ph, label, f"env_{key}",
+            if index < 3:
+                px, py, width = left + index * (third + 8), cy, third
+            else:
+                px, py, width = left + (index - 3) * (half + 8), cy + step, half
+            self._toggle_pill(px, py, px + width, py + ph, label, f"env_{key}",
                               lambda k=key, a=on_label, b=off_label: self.cycle_env(k, a, b), value != "auto",
                               ACCENT, size=9)
-        cy += step
-        for index, (key, label) in enumerate(ENV_SWITCH):
-            px = left + index * (half + 8)
-            self._toggle_pill(px, cy, px + half, cy + ph, label, f"env_{key}",
-                              lambda k=key, lb=label: self.toggle_env(k, lb), self.env[key] == "on", ACCENT, size=9)
-        cy += step
+        cy += 2 * step
         locked = self.env["night"] == "off" and self.env["weather"] == "off"
         self._toggle_pill(left, cy, left + half, cy + ph, "시연 환경 고정", "env_lock", self.lock_env, locked, OK,
                           size=9)

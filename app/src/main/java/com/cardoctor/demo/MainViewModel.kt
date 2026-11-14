@@ -8,6 +8,7 @@ import com.cardoctor.demo.demo.DemoBus
 import com.cardoctor.demo.demo.DemoCommand
 import com.cardoctor.demo.demo.LogKind
 import com.cardoctor.demo.engine.Diagnosis
+import com.cardoctor.demo.engine.DrivingContext
 import com.cardoctor.demo.engine.DiagnosisReport
 import com.cardoctor.demo.engine.Environment
 import com.cardoctor.demo.engine.Grades
@@ -55,13 +56,15 @@ enum class Override(val suffix: String) { AUTO("자동"), FORCE_ON("강제"), FO
 data class EnvironmentControls(
     val night: Override = Override.AUTO,
     val weather: Override = Override.AUTO,
-    val highway: Boolean = false,
-    val longDistance: Boolean = false,
-    /** AUTO follows the gear (D/R = driving). Forced only for demos. */
+    /** AUTO follows the navigation's road speed limit, or the car's speed. */
+    val highway: Override = Override.AUTO,
+    /** AUTO follows the distance left on the navigation route. */
+    val longDistance: Override = Override.AUTO,
+    /** AUTO follows the gear (D/R) and the speed. Forced only for demos. */
     val driving: Override = Override.AUTO
 ) {
     val anyForced: Boolean
-        get() = night != Override.AUTO || weather != Override.AUTO || highway || longDistance || driving != Override.AUTO
+        get() = listOf(night, weather, highway, longDistance, driving).any { it != Override.AUTO }
 }
 
 /** Values set from the PC demo tool that exist only inside the app (see demo/DemoCommands.kt). */
@@ -97,6 +100,8 @@ data class UiState(
     val environment: Environment = Environment(),
     val report: DiagnosisReport = DiagnosisReport(emptyList(), emptyList()),
     val errors: Map<String, String> = emptyMap(),
+    /** Speed, road speed limit and distance left: where the automatic chips get their values. */
+    val drive: com.cardoctor.demo.engine.DriveSignals = com.cardoctor.demo.engine.DriveSignals(),
     val demo: DemoState = DemoState(),
     val assist: Assist = Assist()
 ) {
@@ -133,18 +138,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val navi = NaviLauncher(application)
     private val location = LocationSource(application)
     private val voice = VoiceInput(application) { text -> answer(text) }
+    private val driveSignals = combine(location.position, navi.drive) { pos, nav -> nav.copy(speedKmh = pos.speedKmh) }
 
     private val vehicleState = combine(
         combine(source.snapshot, demo) { snapshot, demo -> withDemoTires(snapshot, demo.lowTires) },
-        source.errors, controls, connected, combine(clockNight, assist) { night, a -> night to a.weather }
-    ) { snapshot, errors, controls, connected, (clockNight, weather) ->
+        source.errors, controls, connected,
+        combine(clockNight, assist, driveSignals) { night, a, d -> Triple(night, a.weather, d) }
+    ) { snapshot, errors, controls, connected, (clockNight, weather, drive) ->
         val environment = Environment(
             night = resolve(controls.night, clockNight),
             // F7: rain or snow from the weather API, or a running wiper (PRD: 와이퍼 → 강우).
             badWeather = resolve(controls.weather, snapshot.wiperSwitchOn == true || weather?.wet == true),
-            highway = controls.highway,
-            longDistance = controls.longDistance,
-            driving = resolve(controls.driving, snapshot.inMotionGear)
+            highway = resolve(controls.highway, DrivingContext.highway(drive)),
+            longDistance = resolve(controls.longDistance, DrivingContext.longDistance(drive)),
+            driving = resolve(controls.driving, DrivingContext.driving(snapshot.inMotionGear, drive.speedKmh))
         )
         UiState(
             connected = connected,
@@ -152,7 +159,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             controls = controls,
             environment = environment,
             report = SeverityEngine.diagnose(snapshot, environment),
-            errors = errors
+            errors = errors,
+            drive = drive
         )
     }
 
@@ -227,7 +235,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Before filming (PC tool): day, clear weather — so live weather and the clock cannot change grades. */
     private fun lockDemoEnvironment() {
-        controls.update { it.copy(night = Override.FORCE_OFF, weather = Override.FORCE_OFF, highway = false, longDistance = false) }
+        controls.update { it.copy(night = Override.FORCE_OFF, weather = Override.FORCE_OFF, highway = Override.FORCE_OFF, longDistance = Override.FORCE_OFF) }
         log(LogKind.ENVIRONMENT, "시연 환경 고정: 낮 · 맑음 (날씨 API 무시)")
     }
 
@@ -265,8 +273,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun cycleNight() = controls.update { it.copy(night = it.night.next()) }
     fun cycleWeather() = controls.update { it.copy(weather = it.weather.next()) }
-    fun toggleHighway() = controls.update { it.copy(highway = !it.highway) }
-    fun toggleLongDistance() = controls.update { it.copy(longDistance = !it.longDistance) }
+    fun toggleHighway() = controls.update { it.copy(highway = it.highway.next()) }
+    fun toggleLongDistance() = controls.update { it.copy(longDistance = it.longDistance.next()) }
 
     // ---- F2 / F4 / F5 -----------------------------------------------------------------------
 
@@ -361,8 +369,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 "night" -> it.copy(night = override)
                 "weather" -> it.copy(weather = override)
                 "driving" -> it.copy(driving = override)
-                "highway" -> it.copy(highway = value == "on")
-                "long" -> it.copy(longDistance = value == "on")
+                "highway" -> it.copy(highway = override)
+                "long" -> it.copy(longDistance = override)
                 else -> it
             }
         }
@@ -464,6 +472,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (envBefore.night != envAfter.night) log(LogKind.ENVIRONMENT, if (envAfter.night) "밤으로 변경" else "낮으로 변경")
         if (envBefore.badWeather != envAfter.badWeather) log(LogKind.ENVIRONMENT, if (envAfter.badWeather) "비·눈으로 변경" else "맑음으로 변경")
         if (envBefore.highway != envAfter.highway) log(LogKind.ENVIRONMENT, if (envAfter.highway) "고속도로로 변경" else "일반도로로 변경")
+        if (envBefore.driving != envAfter.driving) {
+            val speed = after.drive.speedKmh?.let { " · ${it.toInt()}km/h" } ?: ""
+            log(LogKind.ENVIRONMENT, (if (envAfter.driving) "주행 시작" else "정차") + speed)
+        }
         if (envBefore.longDistance != envAfter.longDistance) {
             log(LogKind.ENVIRONMENT, if (envAfter.longDistance) "남은 거리 50km 이상으로 변경" else "남은 거리 근거리로 변경")
         }

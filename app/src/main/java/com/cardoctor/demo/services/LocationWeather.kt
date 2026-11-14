@@ -18,7 +18,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
-data class Position(val lat: Double, val lng: Double, val fixed: Boolean, val source: String)
+data class Position(
+    val lat: Double,
+    val lng: Double,
+    val fixed: Boolean,
+    val source: String,
+    /** Ground speed, km/h: GPS speed when the fix has one, else from the last two fixes. */
+    val speedKmh: Float? = null
+)
 
 /**
  * Car position: Pleos FusedLocation first, Android LocationManager as a fallback. Until the first
@@ -35,11 +42,13 @@ class LocationSource(context: Context) {
     private var fusedActive = false
     private val fusedListener = object : FusedLocationListener {
         override fun onChanged(data: LocationData?) {
-            data?.let { onFix(it.latitude, it.longitude, "FusedLocation") }
+            data?.let { onFix(it.latitude, it.longitude, "FusedLocation", it.timestampMillis.takeIf { t -> t > 0 }) }
         }
         override fun onError(e: Exception) { Log.w(TAG, "fused: ${e.message}") }
     }
-    private val androidListener = LocationListener { onFix(it.latitude, it.longitude, "GPS") }
+    private val androidListener = LocationListener {
+        onFix(it.latitude, it.longitude, "GPS", it.time, if (it.hasSpeed()) it.speed * 3.6f else null)
+    }
 
     fun start() {
         startFused()
@@ -68,7 +77,8 @@ class LocationSource(context: Context) {
             try {
                 if (!lm.isProviderEnabled(provider)) continue
                 lm.getLastKnownLocation(provider)?.let { onFix(it.latitude, it.longitude, "GPS") }
-                lm.requestLocationUpdates(provider, 5_000L, 20f, androidListener, Looper.getMainLooper())
+                // Every second, no distance filter: speed must also drop back to 0 when the car stops.
+                lm.requestLocationUpdates(provider, 1_000L, 0f, androidListener, Looper.getMainLooper())
             } catch (e: Exception) {
                 Log.w(TAG, "location $provider: ${e.message}")
             }
@@ -78,9 +88,33 @@ class LocationSource(context: Context) {
     /** Called again after the user grants the location permission. */
     fun retry() = startAndroid()
 
-    private fun onFix(lat: Double, lng: Double, source: String) {
+    /** Previous fix per source: FusedLocation and GPS report the same place at different moments. */
+    private val lastFix = mutableMapOf<String, Triple<Double, Double, Long>>()
+    private val speeds = mutableMapOf<String, Pair<Float, Long>>()
+
+    private fun onFix(lat: Double, lng: Double, source: String, timeMillis: Long? = null, gpsKmh: Float? = null) {
         if (lat == 0.0 && lng == 0.0) return
-        _position.value = Position(lat, lng, true, source)
+        val now = timeMillis ?: System.currentTimeMillis()
+        val derived = lastFix[source]?.let { (pLat, pLng, pTime) ->
+            val seconds = (now - pTime) / 1000.0
+            if (seconds in 0.5..30.0) (metersBetween(pLat, pLng, lat, lng) / seconds * 3.6).toFloat() else null
+        }
+        lastFix[source] = Triple(lat, lng, now)
+        (gpsKmh ?: derived)?.let { speeds[source] = it to System.currentTimeMillis() }
+        // Highest fresh speed across sources: one source may lag (on the emulator FusedLocation follows the
+        // navigation's own position). Parked GPS jitter stays far below the 5 km/h moving threshold.
+        val fresh = speeds.values.filter { System.currentTimeMillis() - it.second <= SPEED_FRESH_MILLIS }
+            .maxOfOrNull { it.first }
+        _position.value = Position(lat, lng, true, source, fresh)
+    }
+
+    private fun metersBetween(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
+        val r = 6_371_000.0
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLng = Math.toRadians(lng2 - lng1)
+        val a = Math.sin(dLat / 2).let { it * it } +
+            Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) * Math.sin(dLng / 2).let { it * it }
+        return 2 * r * Math.asin(Math.sqrt(a))
     }
 
     fun stop() {
@@ -92,7 +126,10 @@ class LocationSource(context: Context) {
         fusedActive = false
     }
 
-    private companion object { const val TAG = "LocationSource" }
+    private companion object {
+        const val TAG = "LocationSource"
+        const val SPEED_FRESH_MILLIS = 5_000L // releasing the driving lock late is the safe side
+    }
 }
 
 /** F7: current weather. No API key: MET Norway first, Open-Meteo as a fallback. */
