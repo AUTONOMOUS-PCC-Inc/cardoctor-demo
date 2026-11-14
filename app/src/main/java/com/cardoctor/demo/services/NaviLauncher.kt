@@ -17,7 +17,10 @@ import kotlinx.coroutines.flow.StateFlow
  */
 class NaviLauncher(context: Context) {
 
-    private val navi = NaviHelper(context.applicationContext)
+    private val appContext = context.applicationContext
+    private val navi = NaviHelper(appContext)
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    @Volatile private var started = false
     private var ready = false
 
     private val _status = MutableStateFlow<String?>(null)
@@ -38,6 +41,7 @@ class NaviLauncher(context: Context) {
             _drive.value = _drive.value.copy(roadSpeedLimit = limit.takeIf { it > 0 })
         }
         override fun onRouteStarted(info: ai.pleos.playground.navi.data.RouteStartInfo) {
+            started = true
             _status.value = "안내 시작 · ${info.name}"
         }
         override fun onDestinationArrived(info: ai.pleos.playground.navi.data.DestinationArrivedInfo) {
@@ -60,12 +64,39 @@ class NaviLauncher(context: Context) {
         }
     }
 
+    /**
+     * The car's navigation drops route requests ("navi not ready") until its screen has been opened
+     * once after boot. So: bring the navigation to the front first (the driver ends up there anyway),
+     * send the route a moment later, and send it once more if guidance has not started.
+     */
     fun routeTo(place: Place): Boolean {
         if (!ready) {
             _status.value = "차량 내비에 연결되지 않았습니다"
             return false
         }
-        return try {
+        started = false
+        main.removeCallbacksAndMessages(null)
+        openNavigation()
+        _status.value = "내비를 여는 중 · ${place.name}"
+        main.postDelayed({ send(place) }, OPEN_DELAY_MS)
+        main.postDelayed({
+            if (!started) {
+                Log.i(TAG, "guidance not started yet, sending the route again")
+                openNavigation()
+                send(place)
+            }
+        }, OPEN_DELAY_MS + RETRY_AFTER_MS)
+        return true
+    }
+
+    private fun openNavigation() {
+        val intent = appContext.packageManager.getLaunchIntentForPackage(NAVI_PACKAGE) ?: return
+        runCatching { appContext.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            .onFailure { Log.w(TAG, "open navigation: ${it.message}") }
+    }
+
+    private fun send(place: Place) {
+        try {
             navi.requestRoute(
                 RouteInfo(
                     place.lat, place.lng, place.lat, place.lng,
@@ -73,19 +104,23 @@ class NaviLauncher(context: Context) {
                     RouteOption.RECOMMENDED, "", false,
                 )
             )
-            _status.value = "${place.name}(으)로 경로를 요청했습니다"
-            true
+            if (!started) _status.value = "${place.name}(으)로 경로를 요청했습니다"
         } catch (e: Exception) {
             _status.value = "경로 요청 실패: ${e.message}"
-            false
         }
     }
 
     fun stop() {
+        main.removeCallbacksAndMessages(null)
         if (!ready) return
         runCatching { navi.removeListener(listener); navi.release() }
         ready = false
     }
 
-    private companion object { const val TAG = "NaviLauncher" }
+    private companion object {
+        const val TAG = "NaviLauncher"
+        const val NAVI_PACKAGE = "ai.umos.maps.android.navigation.app"
+        const val OPEN_DELAY_MS = 1_500L
+        const val RETRY_AFTER_MS = 3_500L
+    }
 }

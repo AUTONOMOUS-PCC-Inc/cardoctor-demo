@@ -33,6 +33,11 @@
     <!-- F4 Tmap, F6 Gemini, F7 Open-Meteo. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- "안내 시작" brings the car's navigation to the front before sending the route. -->
+    <queries>
+        <package android:name="ai.umos.maps.android.navigation.app" />
+    </queries>
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
