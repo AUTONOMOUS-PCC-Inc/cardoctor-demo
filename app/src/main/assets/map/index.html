@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<!-- Map of nearby repair shops and parking. Tiles: OpenFreeMap (OpenStreetMap data, no key). -->
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0f14; }
+  /* Pinned to the viewport: in the Android WebView a percentage height resolved to 0. */
+  #map { position: fixed; inset: 0; }
+  .pin {
+    width: 34px; height: 34px; border-radius: 50%; box-sizing: border-box;
+    display: flex; align-items: center; justify-content: center;
+    font: 700 16px/1 sans-serif; color: #0b0f14; cursor: pointer;
+    border: 2px solid rgba(255,255,255,.9); box-shadow: 0 4px 14px rgba(0,0,0,.55);
+    transition: transform .2s;
+  }
+  .pin.repair { background: #ffb347; }
+  .pin.parking { background: #8fa3b8; }
+  .pin.selected { transform: scale(1.35); border-color: #fff; box-shadow: 0 0 0 6px rgba(255,179,71,.35), 0 4px 14px rgba(0,0,0,.6); }
+  .me { width: 18px; height: 18px; border-radius: 50%; background: #4da3ff; border: 3px solid #fff;
+        box-shadow: 0 0 0 10px rgba(77,163,255,.25); }
+  .maplibregl-ctrl-attrib { background: rgba(11,15,20,.75) !important; font-size: 11px; }
+  .maplibregl-ctrl-attrib a { color: #9fb0c3 !important; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<script>
+  const bridge = window.Android;
+  let map = null, markers = {}, selected = null, pending = null, loaded = false, bounds = null;
+
+  function koreanLabels() {
+    // The style shows "Latin\nKorean"; drivers read Korean, so show the local name only.
+    for (const layer of map.getStyle().layers) {
+      if (layer.type === 'symbol' && map.getLayoutProperty(layer.id, 'text-field')) {
+        map.setLayoutProperty(layer.id, 'text-field', ['coalesce', ['get', 'name:ko'], ['get', 'name'], ['get', 'name_en']]);
+      }
+    }
+  }
+
+  function buildings3d() {
+    if (map.getLayer('building-3d') || !map.getSource('openmaptiles')) return;
+    map.addLayer({
+      id: 'building-3d', type: 'fill-extrusion', source: 'openmaptiles', 'source-layer': 'building', minzoom: 14,
+      paint: {
+        'fill-extrusion-color': '#2a313b',
+        'fill-extrusion-height': ['coalesce', ['get', 'render_height'], 10],
+        'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0],
+        'fill-extrusion-opacity': 0.85
+      }
+    });
+  }
+
+  function select(id, fly) {
+    if (selected && markers[selected]) markers[selected].el.classList.remove('selected');
+    selected = id;
+    const m = markers[id];
+    if (!m) return;
+    m.el.classList.add('selected');
+    if (fly) map.easeTo({ center: m.marker.getLngLat(), zoom: Math.max(map.getZoom(), 15.5), duration: 600 });
+  }
+
+  window.showPlaces = function (data) {
+    // Markers are DOM elements; they only need the map object, not a fully settled style.
+    if (!map || !loaded) { pending = data; return; }
+    Object.values(markers).forEach(m => m.marker.remove());
+    markers = {};
+    bounds = new maplibregl.LngLatBounds();
+    if (data.me) {
+      const el = document.createElement('div'); el.className = 'me';
+      markers.__me = { el, marker: new maplibregl.Marker({ element: el }).setLngLat([data.me.lng, data.me.lat]).addTo(map) };
+      bounds.extend([data.me.lng, data.me.lat]);
+    }
+    let n = 0;
+    for (const p of data.places) {
+      const el = document.createElement('div');
+      el.className = 'pin ' + (p.kind === 'REPAIR' ? 'repair' : 'parking');
+      el.textContent = p.kind === 'REPAIR' ? String(++n) : 'P';
+      el.addEventListener('click', e => { e.stopPropagation(); select(p.id, true); bridge && bridge.onSelect(p.id); });
+      markers[p.id] = { el, marker: new maplibregl.Marker({ element: el }).setLngLat([p.lng, p.lat]).addTo(map) };
+      bounds.extend([p.lng, p.lat]);
+    }
+    fit();
+    if (data.selected) select(data.selected, false);
+  };
+
+  window.focusPlace = function (id) { select(id, true); };
+
+  // Frame all pins. Called again whenever the WebView's size settles or changes.
+  function fit() {
+    if (!map || !bounds || bounds.isEmpty()) return;
+    map.resize();
+    map.fitBounds(bounds, { padding: 90, maxZoom: 16, duration: 0 });
+  }
+
+  try {
+    map = new maplibregl.Map({
+      container: 'map',
+      style: 'https://tiles.openfreemap.org/styles/dark',
+      center: [127.0947, 37.4127], zoom: 14.5, pitch: 45, bearing: -15,
+      attributionControl: { compact: false }
+    });
+    map.getCanvas().addEventListener('webglcontextlost', () => console.error('webgl context lost'));
+    window.addEventListener('resize', fit);
+    map.on('load', () => {
+      loaded = true;
+      map.resize();
+      koreanLabels();
+      buildings3d();
+      bridge && bridge.onReady(true);
+      if (pending) { const d = pending; pending = null; window.showPlaces(d); }
+      setTimeout(fit, 400);
+    });
+    map.on('error', e => console.error('map: ' + (e && e.error ? e.error.message : 'error')));
+  } catch (e) {
+    console.error('map init: ' + e.message);
+    bridge && bridge.onReady(false);
+  }
+  if (!window.maplibregl) bridge && bridge.onReady(false);
+</script>
+</body>
+</html>

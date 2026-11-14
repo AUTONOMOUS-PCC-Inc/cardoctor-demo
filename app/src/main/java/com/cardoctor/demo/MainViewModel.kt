@@ -87,6 +87,8 @@ data class Assist(
     val detailId: String? = null,
     /** F5: report sheet. */
     val reportOpen: Boolean = false,
+    /** F4: map of nearby places (parked only). */
+    val mapOpen: Boolean = false,
     val exportedPath: String? = null,
     /** Short banner, e.g. why a screen is locked while driving. Cleared after a few seconds. */
     val notice: String? = null,
@@ -309,6 +311,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         assist.update { it.copy(reportOpen = open, exportedPath = if (open) it.exportedPath else null) }
     }
 
+    /** F4 map: a full map is for planning while parked; while driving the car's own navigation shows it. */
+    fun openMap(open: Boolean) {
+        if (open && uiState.value.environment.driving) {
+            showNotice(DRIVING_NOTICE)
+            return
+        }
+        assist.update { it.copy(mapOpen = open) }
+    }
+
     fun reportJson(state: UiState): String = ServiceReport.build(
         state.report, state.snapshot,
         ServiceReport.Context(
@@ -399,8 +410,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** F6 explanations for new diagnoses; F3 speech for diagnoses that newly reach grade 3+. */
     private fun onReport(state: UiState) {
         // Starting to drive closes anything long that was open.
-        if (state.environment.driving && (assist.value.detailId != null || assist.value.reportOpen)) {
-            assist.update { it.copy(detailId = null, reportOpen = false) }
+        if (state.environment.driving && (assist.value.detailId != null || assist.value.reportOpen || assist.value.mapOpen)) {
+            assist.update { it.copy(detailId = null, reportOpen = false, mapOpen = false) }
             showNotice("주행을 시작해 상세 화면을 닫았습니다")
         }
         val current = state.report.diagnoses

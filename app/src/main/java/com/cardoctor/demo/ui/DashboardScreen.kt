@@ -64,6 +64,7 @@ class DashboardActions(
     val onOpenDetail: (String?) -> Unit,
     val onStartGuidance: (Place) -> Unit,
     val onOpenReport: (Boolean) -> Unit,
+    val onOpenMap: (Boolean) -> Unit,
     val onExportReport: () -> Unit,
     val reportJson: (UiState) -> String,
     val onCycleDriving: () -> Unit,
@@ -138,7 +139,7 @@ fun DashboardScreen(state: UiState, actions: DashboardActions) {
                     }
                     OverallCard(grade, waiting, ambient, state.environment.driving) { actions.onOpenReport(true) }
                     if (state.report.diagnoses.isNotEmpty()) {
-                        GuidanceCard(state, actions.onStartGuidance)
+                        GuidanceCard(state, actions.onStartGuidance, { actions.onOpenMap(true) })
                     }
                     FaultList(state, actions.onOpenDetail, Modifier.weight(1f))
                 }
@@ -151,6 +152,9 @@ fun DashboardScreen(state: UiState, actions: DashboardActions) {
         // F2 자세히보기 and F5 리포트 sit above the dashboard.
         state.report.diagnoses.firstOrNull { it.rule.id == state.assist.detailId }?.let { d ->
             DetailOverlay(state, d) { actions.onOpenDetail(null) }
+        }
+        if (state.assist.mapOpen) {
+            PlacesMapOverlay(state, actions.onStartGuidance) { actions.onOpenMap(false) }
         }
         if (state.assist.reportOpen) {
             ReportOverlay(state, actions.reportJson(state), actions.onExportReport) { actions.onOpenReport(false) }

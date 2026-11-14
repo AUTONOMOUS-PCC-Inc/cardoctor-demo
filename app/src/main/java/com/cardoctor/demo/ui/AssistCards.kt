@@ -140,6 +140,7 @@ private fun TireTile(state: UiState, wheel: Wheel, tpmsLit: Boolean, modifier: M
 fun GuidanceCard(
     state: UiState,
     onStartGuidance: (Place) -> Unit,
+    onOpenMap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val grade = state.report.overallGrade
@@ -158,6 +159,14 @@ fun GuidanceCard(
                 },
                 style = Type.body(16, Palette.TextTertiary)
             )
+            Spacer(Modifier.weight(1f))
+            if (state.assist.places.values.any { it.isNotEmpty() }) {
+                ActionPill(
+                    if (state.environment.driving) "지도 · 정차 후" else "지도에서 보기",
+                    if (state.environment.driving) Palette.TextTertiary else Palette.Accent,
+                    onOpenMap
+                )
+            }
         }
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {

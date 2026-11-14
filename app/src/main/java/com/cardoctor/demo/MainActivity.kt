@@ -39,6 +39,7 @@ class MainActivity : ComponentActivity() {
             onOpenDetail = viewModel::openDetail,
             onStartGuidance = viewModel::startGuidance,
             onOpenReport = viewModel::openReport,
+            onOpenMap = viewModel::openMap,
             onExportReport = viewModel::exportReport,
             reportJson = viewModel::reportJson,
             onCycleDriving = viewModel::cycleDriving,
