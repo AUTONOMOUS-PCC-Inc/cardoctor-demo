@@ -336,7 +336,8 @@ private fun OverallCard(grade: Int, waiting: Boolean, ambient: Color, driving: B
     ) {
         GradeDial(grade, waiting, ambient)
         Spacer(Modifier.width(48.dp))
-        Column {
+        // The text column takes the room left over and wraps; the report pill keeps its own width.
+        Column(Modifier.weight(1f)) {
             Text("OVERALL", style = Type.Eyebrow)
             Spacer(Modifier.height(10.dp))
             Text(
@@ -353,7 +354,7 @@ private fun OverallCard(grade: Int, waiting: Boolean, ambient: Color, driving: B
                 style = Type.body(30, Palette.TextBody)
             )
         }
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.width(16.dp))
         // F5 is always one tap away, also when nothing is wrong; locked while driving.
         Box(Modifier.align(Alignment.Top)) {
             ActionPill(
