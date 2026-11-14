@@ -46,6 +46,8 @@ import androidx.webkit.WebViewAssetLoader
 import com.cardoctor.demo.UiState
 import com.cardoctor.demo.services.Place
 import com.cardoctor.demo.services.PlaceKind
+import com.cardoctor.demo.services.RoutePreview
+import com.cardoctor.demo.services.TmapRoutes
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -61,6 +63,14 @@ fun PlacesMapOverlay(state: UiState, onStartGuidance: (Place) -> Unit, onClose: 
     }
     var selected by remember { mutableStateOf(places.firstOrNull()?.id) }
     var focusRequest by remember { mutableStateOf<String?>(null) }
+    // Route previews per place, fetched once when a place is first selected.
+    val routes = remember { androidx.compose.runtime.mutableStateMapOf<String, RoutePreview?>() }
+    val position = state.assist.position
+    androidx.compose.runtime.LaunchedEffect(selected, position?.fixed) {
+        val place = places.firstOrNull { it.id == selected } ?: return@LaunchedEffect
+        if (position == null || routes.containsKey(place.id)) return@LaunchedEffect
+        routes[place.id] = TmapRoutes.route(position.lat, position.lng, place)
+    }
 
     Box(
         Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.72f)).clickable(onClick = onClose),
@@ -77,6 +87,7 @@ fun PlacesMapOverlay(state: UiState, onStartGuidance: (Place) -> Unit, onClose: 
         ) {
             PlacesMapView(
                 state, places, selected, focusRequest,
+                route = selected?.let { id -> routes[id]?.let { id to it } },
                 onSelect = { selected = it },
                 modifier = Modifier.weight(1.65f).fillMaxHeight().padding(10.dp)
             )
@@ -97,7 +108,12 @@ fun PlacesMapOverlay(state: UiState, onStartGuidance: (Place) -> Unit, onClose: 
                 LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(places, key = { it.id }) { place ->
                         val label = labels[place.id] ?: ""
-                        PlaceRow(place, label, place.id == selected, onPick = {
+                        val summary = when {
+                            place.id != selected -> null
+                            !routes.containsKey(place.id) -> "경로 확인 중…"
+                            else -> routes[place.id]?.summary ?: "경로를 불러오지 못했습니다"
+                        }
+                        PlaceRow(place, label, place.id == selected, summary, onPick = {
                             selected = place.id
                             focusRequest = place.id
                         }, onGuide = { onStartGuidance(place); onClose() })
@@ -111,7 +127,7 @@ fun PlacesMapOverlay(state: UiState, onStartGuidance: (Place) -> Unit, onClose: 
 }
 
 @Composable
-private fun PlaceRow(place: Place, label: String, selected: Boolean, onPick: () -> Unit, onGuide: () -> Unit) {
+private fun PlaceRow(place: Place, label: String, selected: Boolean, summary: String?, onPick: () -> Unit, onGuide: () -> Unit) {
     val shape = RoundedCornerShape(20.dp)
     val pin = if (place.kind == PlaceKind.REPAIR) Color(0xFFFFB347) else Color(0xFF8FA3B8)
     Row(
@@ -131,7 +147,8 @@ private fun PlaceRow(place: Place, label: String, selected: Boolean, onPick: () 
         Column(Modifier.weight(1f)) {
             Text(place.name, style = Type.title(22), maxLines = 1, overflow = TextOverflow.Ellipsis)
             val distance = if (place.distanceKm < 1.0) "${(place.distanceKm * 1000).toInt()} m" else "%.1f km".format(place.distanceKm)
-            Text("${place.kind.label} · $distance", style = Type.body(17, Palette.TextSecondary))
+            Text("${place.kind.label} · 직선 $distance", style = Type.body(17, Palette.TextSecondary))
+            summary?.let { Text("차로 $it", style = Type.title(18).copy(color = Palette.Accent)) }
         }
         Spacer(Modifier.width(10.dp))
         Box(
@@ -154,6 +171,7 @@ private fun PlacesMapView(
     places: List<Place>,
     selected: String?,
     focusRequest: String?,
+    route: Pair<String, RoutePreview>?,
     onSelect: (String) -> Unit,
     modifier: Modifier
 ) {
@@ -171,7 +189,15 @@ private fun PlacesMapView(
         }.toString()
     }
     // What was last sent to the page, so recompositions do not re-fit the map or re-fly to a pin.
-    val sent = remember { arrayOfNulls<String>(2) }
+    val sent = remember { arrayOfNulls<String>(3) }
+    val routeJson = remember(route) {
+        route?.let { (id, r) ->
+            val name = places.firstOrNull { it.id == id }?.name ?: ""
+            JSONObject().put("name", name).put("summary", r.summary)
+                .put("coords", JSONArray().apply { r.points.forEach { (lng, lat) -> put(JSONArray().put(lng).put(lat)) } })
+                .toString()
+        } ?: "null"
+    }
 
     Box(modifier.background(Color(0xFF0B0F14)), contentAlignment = Alignment.Center) {
         AndroidView(
@@ -216,6 +242,10 @@ private fun PlacesMapView(
                     if (focusRequest != null && sent[1] != focusRequest) {
                         sent[1] = focusRequest
                         web.evaluateJavascript("window.focusPlace(${JSONObject.quote(focusRequest)})", null)
+                    }
+                    if (sent[2] != routeJson) {
+                        sent[2] = routeJson
+                        web.evaluateJavascript("window.showRoute($routeJson)", null)
                     }
                 }
             }

@@ -311,7 +311,7 @@ WebGL이나 모델을 불러올 수 없는 환경에서는 2D 평면도(`ui/CarD
 | F1 | 브레이크·타이어 공기압 | 3D 차량 아래 **BRAKE · TIRES** 카드. 브레이크 상태(정상/주차 브레이크/ABS/브레이크 시스템)와 바퀴 4개 공기압. 바퀴 값이 기준(차량의 `CRITICALLY_LOW_TIRE_PRESSURE`, 없으면 137kPa)보다 낮으면 "뒤 오른쪽 타이어 공기압 저하"처럼 바퀴를 짚어 판정 | `engine/Model.kt`, `SeverityEngine.kt`, `vehicle/PleosSignalSource.kt`, `ui/AssistCards.kt` |
 | F2 | 주행 중 가독성 | 고장 카드는 큰 한 줄 요약 + 등급 + 판정 근거 + 할 일만. 원인·위험은 **자세히보기** | `ui/DashboardScreen.kt`, `ui/AssistCards.kt` |
 | F3 | 음성 안내 (3등급 이상) | 3등급 이상이 새로 뜰 때 한 번 읽음. Pleos TextToSpeech(ON_DEVICE, ko_KR) | `services/Speaker.kt` |
-| F4 | 가까운 정비소·주차장 + 안내 시작 | Tmap POI 검색(거리순), **안내 시작**을 눌렀을 때만 Pleos NaviHelper로 길안내. NEARBY의 **지도에서 보기**는 정차 중에만 OpenFreeMap 다크 지도(OpenStreetMap 데이터, 키 없음)에 내 위치·정비소 1~3·주차장 P를 핀으로 보여 줍니다. 장소 검색은 한국 데이터가 정확한 Tmap, 지도 그림만 OpenFreeMap | `services/TmapPlaces.kt`, `services/NaviLauncher.kt`, `ui/PlacesMap.kt`, `assets/map/` |
+| F4 | 가까운 정비소·주차장 + 안내 시작 | Tmap POI 검색(거리순), **안내 시작**을 눌렀을 때만 Pleos NaviHelper로 길안내. NEARBY의 **지도에서 보기**는 정차 중에만 OpenFreeMap 다크 지도(OpenStreetMap 데이터, 키 없음)에 내 위치·정비소 1~3·주차장 P를 핀으로 보여 주고, 고른 곳까지 **Tmap 자동차 경로**를 파란 선으로 그려 "약 3분 · 910m"처럼 미리 보여 줍니다(경로 미리보기). 실제 길안내는 차량 내비가 합니다. 장소 검색은 한국 데이터가 정확한 Tmap, 지도 그림만 OpenFreeMap | `services/TmapPlaces.kt`, `services/NaviLauncher.kt`, `ui/PlacesMap.kt`, `assets/map/` |
 | F5 | 진단 결과 QR | **정비소 사전 리포트 · QR**. 팀 PRD(정비소 사전 리포트) JSON schemaVersion 1을 QR로, JSON 파일 저장 | `engine/ServiceReport.kt` |
 | F6 | AI 설명 | Gemini(`gemini-3.5-flash-lite`, 실패 시 `gemini-3.5-flash`)가 요약·원인·위험·할 일·음성 문장 작성. 키가 없거나 실패하면 규칙표 문구 | `services/GeminiExplainer.kt` |
 | F7 | 날씨 연동 | 현재 위치 날씨(MET Norway, 대체 Open-Meteo, 키 불필요)가 비·눈이면 "악천후" 가중치. 와이퍼 신호와 함께 판단 | `services/LocationWeather.kt` |

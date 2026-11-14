@@ -22,6 +22,10 @@
   .pin.selected { transform: scale(1.35); border-color: #fff; box-shadow: 0 0 0 6px rgba(255,179,71,.35), 0 4px 14px rgba(0,0,0,.6); }
   .me { width: 18px; height: 18px; border-radius: 50%; background: #4da3ff; border: 3px solid #fff;
         box-shadow: 0 0 0 10px rgba(77,163,255,.25); }
+  .tag { padding: 7px 12px; border-radius: 12px; background: #2f7dde; color: #fff; white-space: nowrap;
+         font: 600 14px/1.25 sans-serif; box-shadow: 0 4px 14px rgba(0,0,0,.5); transform: translateY(-44px); }
+  .tag small { display: block; font-weight: 500; font-size: 12px; opacity: .85; }
+  .tag.start { background: rgba(20,26,34,.92); border: 1px solid rgba(255,255,255,.25); }
   .maplibregl-ctrl-attrib { background: rgba(11,15,20,.75) !important; font-size: 11px; }
   .maplibregl-ctrl-attrib a { color: #9fb0c3 !important; }
 </style>
@@ -30,7 +34,7 @@
 <div id="map"></div>
 <script>
   const bridge = window.Android;
-  let map = null, markers = {}, selected = null, pending = null, loaded = false, bounds = null;
+  let map = null, markers = {}, selected = null, pending = null, loaded = false, bounds = null, routeBounds = null;
 
   function koreanLabels() {
     // The style shows "Latin\nKorean"; drivers read Korean, so show the local name only.
@@ -89,11 +93,38 @@
 
   window.focusPlace = function (id) { select(id, true); };
 
+  // Route preview (Tmap road geometry). Replaces any previous route; null clears it.
+  let routeTags = [];
+  window.showRoute = function (r) {
+    if (!map || !loaded) return;
+    routeTags.forEach(t => t.remove()); routeTags = [];
+    for (const id of ['route', 'route-casing']) if (map.getLayer(id)) map.removeLayer(id);
+    if (map.getSource('route')) map.removeSource('route');
+    routeBounds = null;
+    if (!r || !r.coords || r.coords.length < 2) return;
+    map.addSource('route', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: r.coords } } });
+    map.addLayer({ id: 'route-casing', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' },
+                   paint: { 'line-color': '#0b2a52', 'line-width': 11 } });
+    map.addLayer({ id: 'route', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' },
+                   paint: { 'line-color': '#4da3ff', 'line-width': 6 } });
+    const tag = (lngLat, html, cls) => {
+      const el = document.createElement('div'); el.className = 'tag ' + (cls || ''); el.innerHTML = html;
+      routeTags.push(new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat(lngLat).addTo(map));
+    };
+    tag(r.coords[0], '현재 위치', 'start');
+    tag(r.coords[r.coords.length - 1], r.name + '<small>' + r.summary + '</small>');
+    const b = new maplibregl.LngLatBounds();
+    r.coords.forEach(c => b.extend(c));
+    routeBounds = b;
+    map.fitBounds(b, { padding: { top: 110, bottom: 70, left: 70, right: 70 }, maxZoom: 16.5, duration: 700 });
+  };
+
   // Frame all pins. Called again whenever the WebView's size settles or changes.
   function fit() {
-    if (!map || !bounds || bounds.isEmpty()) return;
+    const target = routeBounds || bounds;
+    if (!map || !target || target.isEmpty()) return;
     map.resize();
-    map.fitBounds(bounds, { padding: 90, maxZoom: 16, duration: 0 });
+    map.fitBounds(target, { padding: 90, maxZoom: 16, duration: 0 });
   }
 
   try {

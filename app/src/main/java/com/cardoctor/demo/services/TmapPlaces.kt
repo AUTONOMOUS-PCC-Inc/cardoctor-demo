@@ -79,3 +79,85 @@ object TmapPlaces {
         }
     }
 }
+
+/** Road route for the preview: the line to draw plus Tmap's own time and distance. */
+data class RoutePreview(
+    /** [lng, lat] pairs along the road, start to end. */
+    val points: List<Pair<Double, Double>>,
+    val distanceMeters: Int,
+    val timeSeconds: Int
+) {
+    val summary: String
+        get() {
+            val minutes = (timeSeconds + 59) / 60
+            val distance = if (distanceMeters < 1000) "${distanceMeters}m" else "%.1fkm".format(distanceMeters / 1000.0)
+            return "약 ${minutes}분 · $distance"
+        }
+}
+
+/**
+ * F4 preview: the car route from here to a place (Tmap 자동차 경로안내), drawn on the parked map before
+ * "안내 시작". Guidance itself still runs in the car's navigation. Null without a key or on any error.
+ */
+object TmapRoutes {
+
+    suspend fun route(fromLat: Double, fromLng: Double, to: Place): RoutePreview? {
+        if (!TmapPlaces.enabled) return null
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val body = JSONObject()
+                    .put("startX", fromLng.toString()).put("startY", fromLat.toString())
+                    .put("endX", to.lng.toString()).put("endY", to.lat.toString())
+                    .put("startName", URLEncoder.encode("현재 위치", "UTF-8"))
+                    .put("endName", URLEncoder.encode(to.name, "UTF-8"))
+                    .put("reqCoordType", "WGS84GEO").put("resCoordType", "WGS84GEO")
+                    .put("searchOption", "0")
+                val conn = (URL("https://apis.openapi.sk.com/tmap/routes?version=1&format=json")
+                    .openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 5000
+                    readTimeout = 8000
+                    doOutput = true
+                    setRequestProperty("appKey", BuildConfig.TMAP_APP_KEY)
+                    setRequestProperty("Content-Type", "application/json")
+                    setRequestProperty("Accept", "application/json")
+                }
+                try {
+                    conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+                    if (conn.responseCode != 200) {
+                        Log.w("TmapRoutes", "HTTP ${conn.responseCode}")
+                        return@runCatching null
+                    }
+                    parse(conn.inputStream.bufferedReader().readText())
+                } finally {
+                    conn.disconnect()
+                }
+            }.onFailure { Log.w("TmapRoutes", "${to.name}: ${it.message}") }.getOrNull()
+        }
+    }
+
+    private fun parse(body: String): RoutePreview? {
+        val features = JSONObject(body).getJSONArray("features")
+        var distance = 0
+        var time = 0
+        val points = mutableListOf<Pair<Double, Double>>()
+        for (i in 0 until features.length()) {
+            val f = features.getJSONObject(i)
+            val props = f.optJSONObject("properties")
+            if (props != null && props.has("totalDistance")) {
+                distance = props.optInt("totalDistance")
+                time = props.optInt("totalTime")
+            }
+            val geometry = f.getJSONObject("geometry")
+            if (geometry.getString("type") == "LineString") {
+                val coords = geometry.getJSONArray("coordinates")
+                for (j in 0 until coords.length()) {
+                    val c = coords.getJSONArray(j)
+                    val point = c.getDouble(0) to c.getDouble(1)
+                    if (points.lastOrNull() != point) points += point
+                }
+            }
+        }
+        return if (points.size >= 2) RoutePreview(points, distance, time) else null
+    }
+}
