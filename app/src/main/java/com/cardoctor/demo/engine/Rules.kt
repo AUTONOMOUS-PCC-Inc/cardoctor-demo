@@ -160,6 +160,32 @@ object Rules {
         risk = "차량에 점검이 필요한 항목이 있습니다. 계기판 안내를 함께 확인하세요."
     )
 
+    // ---- Public-permission rules: work without PRIVATE_CAR_SAFETY (team fallback plan) ----
+
+    /** CAR_LIGHTS + CAR_DRIVE: driving at night with the headlamp switch off. */
+    val NIGHT_LIGHTS_OFF = FaultRule(
+        id = "night_lights_off",
+        label = "야간 전조등 꺼짐",
+        group = PartGroup.LIGHTING,
+        part = CarPart.HEADLAMPS,
+        baseSeverity = 1,
+        cause = "어두운데 전조등 스위치가 꺼진 채 주행하고 있습니다.",
+        risk = "앞이 잘 보이지 않고, 다른 차가 내 차를 늦게 발견합니다."
+    )
+
+    /** CAR_ENERGY: high-voltage battery below [LOW_BATTERY_PERCENT]. */
+    val LOW_EV_BATTERY = FaultRule(
+        id = "low_ev_battery",
+        label = "구동 배터리 부족",
+        group = PartGroup.ENERGY,
+        part = CarPart.BATTERY,
+        baseSeverity = 2,
+        cause = "구동 배터리 잔량이 15% 아래로 떨어졌습니다.",
+        risk = "남은 거리가 길면 목적지 전에 주행이 제한되거나 멈출 수 있습니다."
+    )
+
+    const val LOW_BATTERY_PERCENT = 15f
+
     /** Telltale type (SDK TelltaleType name) -> rule. Indicator-only lamps are not listed. */
     val BY_TELLTALE: Map<String, FaultRule> = linkedMapOf(
         "TPMS" to TIRE_PRESSURE,

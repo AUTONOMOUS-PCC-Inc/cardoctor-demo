@@ -19,16 +19,18 @@ class MainActivity : ComponentActivity() {
     // F4/F7 need a position; everything else works without it.
     private val locationPermission =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
-            if (granted.values.any { it }) viewModel.onLocationPermission()
+            if (granted.filterKeys { it.contains("LOCATION") }.values.any { it }) viewModel.onLocationPermission()
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            locationPermission.launch(
-                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-            )
-        }
+        // Location for F4/F7, microphone for voice questions; ask once for whatever is missing.
+        val wanted = arrayOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.RECORD_AUDIO
+        ).filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (wanted.isNotEmpty()) locationPermission.launch(wanted.toTypedArray())
         val actions = DashboardActions(
             onCycleNight = viewModel::cycleNight,
             onCycleWeather = viewModel::cycleWeather,
@@ -42,7 +44,12 @@ class MainActivity : ComponentActivity() {
             onStartGuidance = viewModel::startGuidance,
             onOpenReport = viewModel::openReport,
             onExportReport = viewModel::exportReport,
-            reportJson = viewModel::reportJson
+            reportJson = viewModel::reportJson,
+            onCycleDriving = viewModel::cycleDriving,
+            onListen = viewModel::listen,
+            onAsk = viewModel::answer,
+            onDismissVoice = viewModel::dismissVoice,
+            onLockDemoEnvironment = viewModel::lockDemoEnvironment
         )
         setContent {
             val state by viewModel.uiState.collectAsStateWithLifecycle()

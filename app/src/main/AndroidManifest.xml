@@ -6,6 +6,10 @@
     <uses-permission android:name="pleos.car.permission.CAR_LIGHTS" />
     <uses-permission android:name="pleos.car.permission.READ_WINDSHIELD_WIPERS" />
     <uses-permission android:name="pleos.car.permission.CAR_WINDOWS" />
+    <!-- Public signals that keep the app useful without PRIVATE_CAR_SAFETY: gear, traction battery. -->
+    <uses-permission android:name="pleos.car.permission.CAR_DRIVE" />
+    <uses-permission android:name="pleos.car.permission.CAR_ENERGY" />
+    <uses-permission android:name="pleos.car.permission.CAR_INFO" />
 
     <!--
         Safety.getTelltalesInfo() and the Tire API fail with SecurityException without this one.
@@ -19,6 +23,9 @@
     <uses-permission android:name="pleos.car.permission.NAVI_ROUTE_SEARCH" />
     <!-- F3: spoken warnings (Pleos TextToSpeech). -->
     <uses-permission android:name="pleos.car.permission.TTS_SERVICE" />
+    <!-- Voice questions ("지금 가야 돼?"): Pleos SpeechToText. -->
+    <uses-permission android:name="pleos.car.permission.STT_SERVICE" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- F4/F7: position for nearby places and local weather. -->
     <uses-permission android:name="pleos.car.permission.FUSED_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />

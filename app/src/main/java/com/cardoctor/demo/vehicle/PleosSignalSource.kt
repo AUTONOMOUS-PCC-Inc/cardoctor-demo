@@ -113,7 +113,28 @@ class PleosSignalSource(context: Context) {
         }
 
         refreshTires()
+
+        // Public signals (CAR_DRIVE, CAR_ENERGY): driving state and the traction battery.
+        runCatching {
+            vehicle.getGear().getCurrentGearSelectionState(
+                { g -> if (g != null) _snapshot.update { it.copy(gear = g.name.removePrefix("GEAR_")) } },
+                { }
+            )
+        }
+        runCatching {
+            val ev = vehicle.getEvBattery()
+            if (evCapacity == null) ev.getEvBatteryCapacity({ c -> if (c != null && c > 0f) evCapacity = c }, { })
+            ev.getEvBatteryLevel(
+                { level ->
+                    val cap = evCapacity
+                    if (level != null && cap != null) _snapshot.update { it.copy(evBatteryPercent = level / cap * 100f) }
+                },
+                { }
+            )
+        }
     }
+
+    @Volatile private var evCapacity: Float? = null
 
     private companion object {
         val WHEELS = listOf(

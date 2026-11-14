@@ -49,74 +49,85 @@ import java.util.Locale
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun DemoPanel(
-    state: UiState,
-    onInject: (DemoFault, Boolean) -> Unit,
-    onClearAll: () -> Unit,
-    onToggleTire: (com.cardoctor.demo.engine.Wheel) -> Unit,
-    modifier: Modifier = Modifier
-) {
+fun DemoPanel(state: UiState, actions: DashboardActions, modifier: Modifier = Modifier) {
     val lit = state.snapshot.telltales.orEmpty().map { it.type }.toSet()
     fun isOn(fault: DemoFault): Boolean =
         if (fault.sdkType != null) fault.sdkType in lit else state.snapshot.wiperSwitchOn == true
 
-    Row(modifier.fillMaxWidth().glass(28.dp).padding(horizontal = 28.dp, vertical = 22.dp)) {
-        Column(Modifier.weight(0.9f).fillMaxHeight()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("FAULT INJECTION", style = Type.Eyebrow.copy(fontSize = 14.sp, letterSpacing = 4.sp))
-                Spacer(Modifier.width(14.dp))
-                Box(
-                    Modifier.size(8.dp).clip(CircleShape)
-                        .background(if (state.demo.consoleOnline) Palette.Ok else Palette.Caution)
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    if (state.demo.consoleOnline) "가상 콘솔 연결됨" else "가상 콘솔 연결 중…",
-                    style = Type.body(15, Palette.TextSecondary)
-                )
-            }
-            Spacer(Modifier.height(14.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                DemoFault.entries.forEach { fault ->
-                    val on = isOn(fault)
-                    InjectSwitch(fault.label, on, if (fault.color == "Red") Palette.Danger else Palette.Caution) {
-                        onInject(fault, !on)
-                    }
+    Column(modifier.fillMaxWidth().glass(28.dp).padding(horizontal = 26.dp, vertical = 22.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("FAULT INJECTION", style = Type.Eyebrow.copy(fontSize = 14.sp, letterSpacing = 4.sp))
+            Spacer(Modifier.width(14.dp))
+            Box(
+                Modifier.size(8.dp).clip(CircleShape)
+                    .background(if (state.demo.consoleOnline) Palette.Ok else Palette.Caution)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                if (state.demo.consoleOnline) "가상 콘솔 연결됨" else "가상 콘솔 연결 중…",
+                style = Type.body(15, Palette.TextSecondary)
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            DemoFault.entries.forEach { fault ->
+                val on = isOn(fault)
+                InjectSwitch(fault.label, on, if (fault.color == "Red") Palette.Danger else Palette.Caution) {
+                    actions.onInject(fault, !on)
                 }
-                InjectSwitch("모두 해제", false, Palette.Accent, onClearAll)
             }
-            Spacer(Modifier.height(12.dp))
-            // F1: the emulator has no tire pressure values, so wheels are simulated in the app.
-            Text("TIRE PRESSURE · 시연값", style = Type.Eyebrow.copy(fontSize = 13.sp, letterSpacing = 3.sp))
-            Spacer(Modifier.height(8.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                com.cardoctor.demo.engine.Wheel.entries.forEach { wheel ->
-                    InjectSwitch("${wheel.label} 저압", wheel in state.demo.lowTires, Palette.Caution) {
-                        onToggleTire(wheel)
-                    }
+            InjectSwitch("모두 해제", false, Palette.Accent, actions.onClearAllFaults)
+        }
+        Spacer(Modifier.height(14.dp))
+        // F1: the emulator has no tire pressure values, so wheels are simulated in the app.
+        Text("TIRE PRESSURE · 시연값", style = Type.Eyebrow.copy(fontSize = 13.sp, letterSpacing = 3.sp))
+        Spacer(Modifier.height(8.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            com.cardoctor.demo.engine.Wheel.entries.forEach { wheel ->
+                InjectSwitch("${wheel.label} 저압", wheel in state.demo.lowTires, Palette.Caution) {
+                    actions.onToggleDemoTire(wheel)
                 }
             }
         }
-
-        Spacer(Modifier.width(24.dp))
-        Box(Modifier.width(1.dp).fillMaxHeight().background(Palette.Hairline))
-        Spacer(Modifier.width(24.dp))
-
-        Column(Modifier.weight(1.1f).fillMaxHeight()) {
-            Text("LIVE MONITOR", style = Type.Eyebrow.copy(fontSize = 14.sp, letterSpacing = 4.sp))
-            Spacer(Modifier.height(12.dp))
-            // Newest entry first; keep the list pinned to the top as entries arrive.
-            val listState = rememberLazyListState()
-            LaunchedEffect(state.demo.log.firstOrNull()?.id) { listState.scrollToItem(0) }
-            LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                items(state.demo.log, key = { it.id }) { LogRow(it) }
+        Spacer(Modifier.height(14.dp))
+        // The emulator has no microphone input: the same questions as buttons go through the
+        // same parser and answer path as speech.
+        Text("VOICE · 질문 시연", style = Type.Eyebrow.copy(fontSize = 13.sp, letterSpacing = 3.sp))
+        Spacer(Modifier.height(8.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            com.cardoctor.demo.engine.VoiceCommands.SAMPLES.forEach { q ->
+                InjectSwitch(q, false, Palette.Accent) { actions.onAsk(q) }
             }
+        }
+        Spacer(Modifier.height(14.dp))
+        // Live weather and the clock can change grades mid-demo; this pins 낮 · 맑음 · 일반도로 · 근거리.
+        val locked = state.controls.night == com.cardoctor.demo.Override.FORCE_OFF &&
+            state.controls.weather == com.cardoctor.demo.Override.FORCE_OFF &&
+            !state.environment.highway && !state.environment.longDistance
+        InjectSwitch(
+            if (locked) "시연 환경 고정됨 (낮·맑음)" else "시연 환경 고정 (낮·맑음)",
+            locked, Palette.Ok, actions.onLockDemoEnvironment
+        )
+
+        Spacer(Modifier.height(14.dp))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.Hairline))
+        Spacer(Modifier.height(12.dp))
+        Text("LIVE MONITOR", style = Type.Eyebrow.copy(fontSize = 14.sp, letterSpacing = 4.sp))
+        Spacer(Modifier.height(10.dp))
+        // Newest entry first; keep the list pinned to the top as entries arrive.
+        val listState = rememberLazyListState()
+        LaunchedEffect(state.demo.log.firstOrNull()?.id) { listState.scrollToItem(0) }
+        LazyColumn(state = listState, modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            items(state.demo.log, key = { it.id }) { LogRow(it) }
         }
     }
 }

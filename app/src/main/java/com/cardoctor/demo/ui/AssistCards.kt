@@ -140,7 +140,6 @@ private fun TireTile(state: UiState, wheel: Wheel, tpmsLit: Boolean, modifier: M
 fun GuidanceCard(
     state: UiState,
     onStartGuidance: (Place) -> Unit,
-    onOpenReport: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val grade = state.report.overallGrade
@@ -159,8 +158,6 @@ fun GuidanceCard(
                 },
                 style = Type.body(16, Palette.TextTertiary)
             )
-            Spacer(Modifier.weight(1f))
-            ActionPill("정비소 사전 리포트 · QR", Palette.Accent, onOpenReport)
         }
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {

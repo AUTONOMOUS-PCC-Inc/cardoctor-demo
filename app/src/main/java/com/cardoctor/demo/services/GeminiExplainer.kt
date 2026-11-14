@@ -32,6 +32,24 @@ object GeminiExplainer {
 
     val enabled: Boolean get() = BuildConfig.GEMINI_API_KEY.isNotBlank()
 
+    /**
+     * Android app restriction for the key: Google checks these two headers when the key is
+     * restricted to "Android apps" (package + SHA-1) in the Cloud console, so a key copied out of
+     * the APK does not work from anywhere else.
+     */
+    private var packageName: String? = null
+    private var certSha1: String? = null
+
+    fun init(context: android.content.Context) {
+        packageName = context.packageName
+        certSha1 = runCatching {
+            val pm = context.packageManager
+            val info = pm.getPackageInfo(context.packageName, android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)
+            val cert = info.signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray() ?: return@runCatching null
+            java.security.MessageDigest.getInstance("SHA-1").digest(cert).joinToString("") { "%02X".format(it) }
+        }.getOrNull()
+    }
+
     /** Fast model first; the larger one only when the first fails. */
     private val MODELS = listOf("gemini-3.5-flash-lite", "gemini-3.5-flash")
 
@@ -107,6 +125,8 @@ object GeminiExplainer {
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 setRequestProperty("x-goog-api-key", BuildConfig.GEMINI_API_KEY)
+                packageName?.let { setRequestProperty("X-Android-Package", it) }
+                certSha1?.let { setRequestProperty("X-Android-Cert", it) }
             }
             try {
                 conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }

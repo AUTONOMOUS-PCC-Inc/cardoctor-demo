@@ -70,7 +70,12 @@ class DashboardActions(
     val onStartGuidance: (Place) -> Unit,
     val onOpenReport: (Boolean) -> Unit,
     val onExportReport: () -> Unit,
-    val reportJson: (UiState) -> String
+    val reportJson: (UiState) -> String,
+    val onCycleDriving: () -> Unit,
+    val onListen: () -> Unit,
+    val onAsk: (String) -> Unit,
+    val onDismissVoice: () -> Unit,
+    val onLockDemoEnvironment: () -> Unit
 )
 
 @Composable
@@ -127,25 +132,30 @@ fun DashboardScreen(state: UiState, actions: DashboardActions) {
         Column(
             Modifier.fillMaxSize().padding(start = 60.dp, end = 60.dp, top = 36.dp, bottom = 30.dp)
         ) {
-            TopBar(state, onCycleNight, onCycleWeather, onToggleHighway, onToggleLongDistance, onToggleDemo)
+            TopBar(state, actions)
             Spacer(Modifier.height(28.dp))
             Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.Hairline))
             Spacer(Modifier.height(28.dp))
 
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(44.dp)) {
-                VehiclePanel(state, ambient, Modifier.weight(0.72f).fillMaxHeight())
+                // The demo console takes the car's place so the fault cards stay fully visible.
+                if (state.demo.open) {
+                    DemoPanel(state, actions, Modifier.weight(0.72f).fillMaxHeight())
+                } else {
+                    VehiclePanel(state, ambient, Modifier.weight(0.72f).fillMaxHeight())
+                }
                 Column(
                     Modifier.weight(1.28f).fillMaxHeight(),
                     verticalArrangement = Arrangement.spacedBy(24.dp)
                 ) {
-                    OverallCard(grade, waiting, ambient)
+                    if (state.assist.voice.transcript != null || state.assist.voice.reply != null || state.assist.voice.listening) {
+                        VoiceBubble(state, actions.onDismissVoice)
+                    }
+                    OverallCard(grade, waiting, ambient, state.environment.driving) { actions.onOpenReport(true) }
                     if (state.report.diagnoses.isNotEmpty()) {
-                        GuidanceCard(state, actions.onStartGuidance, { actions.onOpenReport(true) })
+                        GuidanceCard(state, actions.onStartGuidance)
                     }
                     FaultList(state, actions.onOpenDetail, Modifier.weight(1f))
-                    if (state.demo.open) {
-                        DemoPanel(state, onInject, onClearAllFaults, actions.onToggleDemoTire, Modifier.height(480.dp))
-                    }
                 }
             }
 
@@ -160,18 +170,17 @@ fun DashboardScreen(state: UiState, actions: DashboardActions) {
         if (state.assist.reportOpen) {
             ReportOverlay(state, actions.reportJson(state), actions.onExportReport) { actions.onOpenReport(false) }
         }
+        state.assist.notice?.let { NoticeBanner(it, Modifier.align(Alignment.BottomCenter).padding(bottom = 90.dp)) }
     }
 }
 
 @Composable
-private fun TopBar(
-    state: UiState,
-    onCycleNight: () -> Unit,
-    onCycleWeather: () -> Unit,
-    onToggleHighway: () -> Unit,
-    onToggleLongDistance: () -> Unit,
-    onToggleDemo: () -> Unit
-) {
+private fun TopBar(state: UiState, actions: DashboardActions) {
+    val onCycleNight = actions.onCycleNight
+    val onCycleWeather = actions.onCycleWeather
+    val onToggleHighway = actions.onToggleHighway
+    val onToggleLongDistance = actions.onToggleLongDistance
+    val onToggleDemo = actions.onToggleDemo
     val env = state.environment
     val controls = state.controls
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -201,8 +210,21 @@ private fun TopBar(
         } else {
             Text("DRIVING CONTEXT", style = Type.Eyebrow.copy(fontSize = 16.sp))
         }
-        Spacer(Modifier.width(24.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        Spacer(Modifier.width(18.dp))
+        MicButton(state.assist.voice.listening, actions.onListen)
+        Spacer(Modifier.width(18.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            EnvChip(
+                text = if (env.driving) "주행 중" else "정차",
+                detail = when {
+                    controls.driving != Override.AUTO -> controls.driving.suffix
+                    state.snapshot.gear != null -> "기어 ${gearLetter(state.snapshot.gear)}"
+                    else -> "기어 신호"
+                },
+                active = env.driving,
+                forced = controls.driving != Override.AUTO,
+                onClick = actions.onCycleDriving
+            )
             EnvChip(
                 text = if (env.night) "밤" else "낮",
                 detail = controls.night.suffix,
@@ -263,11 +285,11 @@ private fun EnvChip(text: String, detail: String, active: Boolean, forced: Boole
             )
             .border(1.5.dp, edge, shape)
             .clickable(onClick = onClick)
-            .padding(horizontal = 30.dp),
+            .padding(horizontal = 24.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(text, style = Type.title(27))
-        Spacer(Modifier.width(14.dp))
+        Spacer(Modifier.width(12.dp))
         if (forced) {
             Box(Modifier.size(8.dp).clip(CircleShape).background(Palette.Caution))
             Spacer(Modifier.width(8.dp))
@@ -314,7 +336,7 @@ private fun Legend(text: String, color: Color) {
 }
 
 @Composable
-private fun OverallCard(grade: Int, waiting: Boolean, ambient: Color) {
+private fun OverallCard(grade: Int, waiting: Boolean, ambient: Color, driving: Boolean, onOpenReport: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -348,6 +370,15 @@ private fun OverallCard(grade: Int, waiting: Boolean, ambient: Color) {
             Text(
                 if (waiting) "경고등 정보를 아직 읽지 못했습니다." else Grades.action(grade),
                 style = Type.body(30, Palette.TextBody)
+            )
+        }
+        Spacer(Modifier.weight(1f))
+        // F5 is always one tap away, also when nothing is wrong; locked while driving.
+        Box(Modifier.align(Alignment.Top)) {
+            ActionPill(
+                if (driving) "리포트 · 정차 후" else "정비소 리포트 · QR",
+                if (driving) Palette.TextTertiary else Palette.Accent,
+                onOpenReport
             )
         }
     }
@@ -424,7 +455,7 @@ private fun FaultList(state: UiState, onOpenDetail: (String?) -> Unit, modifier:
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(20.dp)) {
         items(state.report.notices) { NoticeCard(it) }
         items(state.report.diagnoses, key = { it.rule.id }) { d ->
-            FaultCard(d, state.explanationOf(d).summary) { onOpenDetail(d.rule.id) }
+            FaultCard(d, state.explanationOf(d).summary, state.environment.driving) { onOpenDetail(d.rule.id) }
         }
     }
 }
@@ -446,7 +477,7 @@ private fun NoticeCard(text: String) {
  * the cause/risk text lives behind "자세히보기".
  */
 @Composable
-private fun FaultCard(diagnosis: Diagnosis, summary: String, onDetail: () -> Unit) {
+private fun FaultCard(diagnosis: Diagnosis, summary: String, driving: Boolean, onDetail: () -> Unit) {
     val color = Palette.grade(diagnosis.grade)
     Row(Modifier.fillMaxWidth().glass(28.dp).height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
         // Grade-coloured edge light.
@@ -495,11 +526,18 @@ private fun FaultCard(diagnosis: Diagnosis, summary: String, onDetail: () -> Uni
                     .heightIn(min = 72.dp)
                     .clip(shape)
                     .background(Color.White.copy(alpha = 0.06f))
-                    .border(1.5.dp, Color.White.copy(alpha = 0.3f), shape)
+                    .border(1.5.dp, Color.White.copy(alpha = if (driving) 0.12f else 0.3f), shape)
                     .clickable(onClick = onDetail)
                     .padding(horizontal = 26.dp),
                 contentAlignment = Alignment.Center
-            ) { Text("자세히보기", style = Type.title(22)) }
+            ) {
+                // While driving the details stay closed (driver distraction); the button says why.
+                Text(
+                    if (driving) "정차 후\n자세히" else "자세히보기",
+                    style = Type.title(22).copy(color = if (driving) Palette.TextTertiary else Palette.TextPrimary),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            }
         }
     }
 }
@@ -528,13 +566,19 @@ private fun Footer(state: UiState) {
         Text(
             when {
                 !state.connected -> "차량 서비스에 연결하지 못했습니다"
+                // PRIVATE_CAR_SAFETY not granted: tire, EV battery and night-driving rules still work.
+                state.errors["경고등"] == "권한 없음" ->
+                    "공개 신호 모드 · 경고등 권한 없음 → 타이어 · 배터리 · 전조등 신호로 진단"
                 state.errors.isNotEmpty() ->
                     "읽지 못한 신호: " + state.errors.entries.joinToString(", ") { "${it.key}(${it.value})" }
-                else -> "Pleos Vehicle SDK 연결됨 · 경고등 · 전조등 · 와이퍼 · 타이어 신호 실시간 수신"
+                else -> "Pleos Vehicle SDK 연결됨 · 경고등 · 타이어 · 기어 · 배터리 신호 실시간 수신"
             },
-            style = Type.body(19, Palette.TextTertiary)
+            style = Type.body(22, Palette.TextSecondary),
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
         )
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.width(24.dp))
         Text(
             buildList {
                 add(if (com.cardoctor.demo.services.GeminiExplainer.enabled) "AI 설명 Gemini" else "AI 설명 꺼짐")
@@ -542,7 +586,91 @@ private fun Footer(state: UiState) {
                 state.assist.weather?.let { add("날씨 ${it.label}") }
                 add("등급은 규칙 엔진이 판정")
             }.joinToString("  ·  "),
-            style = Type.body(19, Palette.TextTertiary)
+            style = Type.body(22, Palette.TextSecondary)
         )
+    }
+}
+
+private fun gearLetter(gear: String): String = when (gear) {
+    "PARK" -> "P"
+    "DRIVE" -> "D"
+    "REVERSE" -> "R"
+    "NEUTRAL" -> "N"
+    else -> gear.take(3)
+}
+
+/** Voice question: asking is the safe way to get details while driving. */
+@Composable
+private fun MicButton(listening: Boolean, onClick: () -> Unit) {
+    val pulse = rememberInfiniteTransition(label = "mic")
+    val alpha by pulse.animateFloat(
+        0.35f, 1f, infiniteRepeatable(tween(700, easing = LinearEasing), RepeatMode.Reverse), label = "micAlpha"
+    )
+    Box(
+        Modifier
+            .size(72.dp)
+            .clip(CircleShape)
+            .background(if (listening) Palette.Accent.copy(alpha = 0.25f * alpha) else Color.White.copy(alpha = 0.06f))
+            .border(1.5.dp, if (listening) Palette.Accent.copy(alpha = alpha) else Color.White.copy(alpha = 0.25f), CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(Modifier.size(34.dp)) {
+            val c = if (listening) Palette.Accent else Color.White
+            val w = size.width
+            val stroke = 3.dp.toPx()
+            // Capsule
+            drawRoundRect(
+                c, topLeft = Offset(w * 0.32f, 0f), size = Size(w * 0.36f, w * 0.62f),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.18f)
+            )
+            // Holder arc and stem
+            drawArc(
+                c, 0f, 180f, false, topLeft = Offset(w * 0.18f, w * 0.22f), size = Size(w * 0.64f, w * 0.56f),
+                style = Stroke(stroke, cap = StrokeCap.Round)
+            )
+            drawLine(c, Offset(w / 2, w * 0.78f), Offset(w / 2, w * 0.96f), stroke, StrokeCap.Round)
+        }
+    }
+}
+
+@Composable
+private fun VoiceBubble(state: UiState, onDismiss: () -> Unit) {
+    val v = state.assist.voice
+    Column(
+        Modifier.fillMaxWidth().glass(28.dp).clickable(onClick = onDismiss)
+            .padding(horizontal = 36.dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("VOICE", style = Type.Eyebrow.copy(color = Palette.Accent))
+            Spacer(Modifier.width(20.dp))
+            Text(
+                when {
+                    v.listening && v.transcript.isNullOrBlank() -> "듣고 있어요…"
+                    v.transcript != null -> "“${v.transcript}”"
+                    else -> ""
+                },
+                style = Type.body(26, Palette.TextSecondary), maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            Text("닫기", style = Type.body(22, Palette.TextTertiary))
+        }
+        v.reply?.let { Text(it, style = Type.title(28).copy(color = Palette.TextPrimary)) }
+    }
+}
+
+@Composable
+private fun NoticeBanner(text: String, modifier: Modifier) {
+    val shape = RoundedCornerShape(36.dp)
+    Box(
+        modifier
+            .clip(shape)
+            .background(Color(0xF0181C24))
+            .border(1.5.dp, Palette.Caution, shape)
+            .padding(horizontal = 40.dp, vertical = 22.dp)
+    ) {
+        Text(text, style = Type.title(26).copy(color = Palette.TextPrimary))
     }
 }

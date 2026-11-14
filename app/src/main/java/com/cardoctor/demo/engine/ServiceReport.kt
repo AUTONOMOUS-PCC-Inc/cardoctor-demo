@@ -86,6 +86,8 @@ object ServiceReport {
     /** PRD 감지 방식 values, inferred from how the engine phrased the evidence. */
     fun detectionPattern(source: String): String = when {
         source.startsWith("공기압") -> "임계값 초과"
+        source.contains("구동 배터리") -> "임계값 초과"
+        source.contains("야간 주행 중") -> "상태 조합"
         source.startsWith("신호:") -> "명령·실제 불일치"
         source.contains("동시 점등") -> "상태 조합"
         source.startsWith("경고등") -> "경고등 점등"

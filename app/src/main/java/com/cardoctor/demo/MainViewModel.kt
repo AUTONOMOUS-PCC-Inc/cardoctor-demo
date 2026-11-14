@@ -25,6 +25,9 @@ import com.cardoctor.demo.services.Place
 import com.cardoctor.demo.services.PlaceKind
 import com.cardoctor.demo.services.Position
 import com.cardoctor.demo.services.Speaker
+import com.cardoctor.demo.services.VoiceInput
+import com.cardoctor.demo.engine.VoiceCommand
+import com.cardoctor.demo.engine.VoiceCommands
 import com.cardoctor.demo.services.TmapPlaces
 import com.cardoctor.demo.services.Weather
 import com.cardoctor.demo.services.WeatherApi
@@ -54,9 +57,12 @@ data class EnvironmentControls(
     val night: Override = Override.AUTO,
     val weather: Override = Override.AUTO,
     val highway: Boolean = false,
-    val longDistance: Boolean = false
+    val longDistance: Boolean = false,
+    /** AUTO follows the gear (D/R = driving). Forced only for demos. */
+    val driving: Override = Override.AUTO
 ) {
-    val anyForced: Boolean get() = night != Override.AUTO || weather != Override.AUTO || highway || longDistance
+    val anyForced: Boolean
+        get() = night != Override.AUTO || weather != Override.AUTO || highway || longDistance || driving != Override.AUTO
 }
 
 /** State of the demo console (debug builds only). */
@@ -83,7 +89,10 @@ data class Assist(
     val detailId: String? = null,
     /** F5: report sheet. */
     val reportOpen: Boolean = false,
-    val exportedPath: String? = null
+    val exportedPath: String? = null,
+    /** Short banner, e.g. why a screen is locked while driving. Cleared after a few seconds. */
+    val notice: String? = null,
+    val voice: com.cardoctor.demo.services.VoiceState = com.cardoctor.demo.services.VoiceState()
 )
 
 data class UiState(
@@ -130,6 +139,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val speaker = Speaker(application)
     private val navi = NaviLauncher(application)
     private val location = LocationSource(application)
+    private val voice = VoiceInput(application) { text -> answer(text) }
 
     private val vehicleState = combine(
         combine(source.snapshot, demo) { snapshot, demo -> withDemoTires(snapshot, demo.lowTires) },
@@ -140,7 +150,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // F7: rain or snow from the weather API, or a running wiper (PRD: 와이퍼 → 강우).
             badWeather = resolve(controls.weather, snapshot.wiperSwitchOn == true || weather?.wet == true),
             highway = controls.highway,
-            longDistance = controls.longDistance
+            longDistance = controls.longDistance,
+            driving = resolve(controls.driving, snapshot.inMotionGear)
         )
         UiState(
             connected = connected,
@@ -160,9 +171,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val explaining = mutableSetOf<String>()
 
     init {
+        GeminiExplainer.init(application)
         speaker.start()
         navi.start()
         location.start()
+        voice.start()
+        viewModelScope.launch { voice.state.collect { v -> assist.update { it.copy(voice = v) } } }
 
         viewModelScope.launch {
             connected.value = source.initialize()
@@ -224,6 +238,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---- Environment chips -------------------------------------------------------------------
 
+    fun cycleDriving() = controls.update { it.copy(driving = it.driving.next()) }
+
+    /** One tap before filming: day, clear weather, parked — so live weather cannot change grades. */
+    fun lockDemoEnvironment() {
+        controls.update { it.copy(night = Override.FORCE_OFF, weather = Override.FORCE_OFF, highway = false, longDistance = false) }
+        log(LogKind.ENVIRONMENT, "시연 환경 고정: 낮 · 맑음 (날씨 API 무시)")
+    }
+
+    // ---- Voice questions ---------------------------------------------------------------------
+
+    fun listen() = voice.listen()
+    fun dismissVoice() = voice.dismiss()
+
+    /** Spoken or typed question → answer on screen and aloud. */
+    fun answer(question: String) {
+        voice.cancel() // the mic must be closed before the answer is spoken
+        val state = uiState.value
+        val reply = when (VoiceCommands.parse(question)) {
+            VoiceCommand.STATUS -> VoiceCommands.statusAnswer(state.report, state.environment)
+            VoiceCommand.EXPLAIN -> state.report.diagnoses.firstOrNull()?.let { d ->
+                val exp = state.explanationOf(d)
+                "${d.rule.label}. ${exp.risk} ${exp.action}"
+            } ?: "지금은 위험한 항목이 없습니다."
+            VoiceCommand.ROUTE_TO_SHOP -> state.assist.places[PlaceKind.REPAIR]?.firstOrNull()?.let { shop ->
+                startGuidance(shop)
+                "가장 가까운 ${shop.name}(으)로 안내를 시작합니다."
+            } ?: "근처 정비소를 찾지 못했습니다."
+            VoiceCommand.REPORT -> if (state.environment.driving) {
+                VoiceCommands.REPORT_WHILE_DRIVING
+            } else {
+                openReport(true)
+                "정비소 사전 리포트를 열었습니다. QR을 정비소에 보여 주세요."
+            }
+            VoiceCommand.UNKNOWN -> VoiceCommands.UNKNOWN_ANSWER
+        }
+        voice.show(question, reply)
+        speaker.speak(reply)
+        log(LogKind.OVERALL, "음성 질문: \"$question\" → $reply")
+    }
+
     fun cycleNight() = controls.update { it.copy(night = it.night.next()) }
     fun cycleWeather() = controls.update { it.copy(weather = it.weather.next()) }
     fun toggleHighway() = controls.update { it.copy(highway = !it.highway) }
@@ -231,15 +285,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---- F2 / F4 / F5 -----------------------------------------------------------------------
 
-    fun openDetail(ruleId: String?) = assist.update { it.copy(detailId = ruleId) }
+    /** F2 + driver distraction: long text only while parked; while driving, point to voice instead. */
+    fun openDetail(ruleId: String?) {
+        if (ruleId != null && uiState.value.environment.driving) {
+            showNotice(DRIVING_NOTICE)
+            return
+        }
+        assist.update { it.copy(detailId = ruleId) }
+    }
 
-    /** Only ever called from the "안내 시작" button (PRD F4: no automatic guidance). */
+    private fun showNotice(text: String) {
+        assist.update { it.copy(notice = text) }
+        viewModelScope.launch {
+            delay(4_000)
+            assist.update { if (it.notice == text) it.copy(notice = null) else it }
+        }
+    }
+
+    /** Only on the driver's request: the "안내 시작" button or "정비소 안내해줘" (PRD F4: no automatic guidance). */
     fun startGuidance(place: Place) {
         navi.routeTo(place)
         log(LogKind.ENVIRONMENT, "안내 시작 요청: ${place.kind.label} ${place.name}")
     }
 
-    fun openReport(open: Boolean) = assist.update { it.copy(reportOpen = open, exportedPath = if (open) it.exportedPath else null) }
+    fun openReport(open: Boolean) {
+        if (open && uiState.value.environment.driving) {
+            showNotice(DRIVING_NOTICE)
+            return
+        }
+        assist.update { it.copy(reportOpen = open, exportedPath = if (open) it.exportedPath else null) }
+    }
 
     fun reportJson(state: UiState): String = ServiceReport.build(
         state.report, state.snapshot,
@@ -307,6 +382,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         source.release()
+        voice.stop()
         speaker.stop()
         navi.stop()
         location.stop()
@@ -323,6 +399,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** F6 explanations for new diagnoses; F3 speech for diagnoses that newly reach grade 3+. */
     private fun onReport(state: UiState) {
+        // Starting to drive closes anything long that was open.
+        if (state.environment.driving && (assist.value.detailId != null || assist.value.reportOpen)) {
+            assist.update { it.copy(detailId = null, reportOpen = false) }
+            showNotice("주행을 시작해 상세 화면을 닫았습니다")
+        }
         val current = state.report.diagnoses
         val currentKeys = current.map { UiState.key(it) }.toSet()
         spoken.retainAll(currentKeys)
@@ -461,5 +542,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val SPEECH_WAIT_MILLIS = 4_000L
         const val DEMO_LOW_KPA = 120f
         const val DEMO_OK_KPA = 235f
+        const val DRIVING_NOTICE = "주행 중에는 정차 후 확인할 수 있습니다 · 음성으로 \"왜 위험해?\"라고 물어보세요"
     }
 }

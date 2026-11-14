@@ -9,7 +9,7 @@ package com.cardoctor.demo.engine
 object SeverityEngine {
 
     fun diagnose(snapshot: VehicleSnapshot, environment: Environment): DiagnosisReport {
-        val detection = FaultDetector.detect(snapshot)
+        val detection = FaultDetector.detect(snapshot, environment)
         val diagnoses = detection.faults
             .map { judge(it, environment) }
             .sortedWith(compareByDescending<Diagnosis> { it.grade }.thenByDescending { it.score })
@@ -56,6 +56,10 @@ object SeverityEngine {
         if (environment.longDistance && group in setOf(PartGroup.COOLING, PartGroup.POWER)) {
             add(AppliedWeight("남은 거리 김", 1))
         }
+        // A low traction battery matters most when the destination is far (근거리 2등급 → 장거리 3등급).
+        if (environment.longDistance && group == PartGroup.ENERGY) {
+            add(AppliedWeight("남은 거리 김", 2))
+        }
     }
 }
 
@@ -66,11 +70,21 @@ object FaultDetector {
 
     private val PARKING_BRAKE_TYPES = setOf("PARKING_BRAKE", "ELECTRONIC_PARKING_BRAKE")
 
-    fun detect(snapshot: VehicleSnapshot): Result {
+    fun detect(snapshot: VehicleSnapshot, environment: Environment = Environment()): Result {
         val lit = snapshot.telltales.orEmpty()
         val byType = lit.associateBy { it.type }
         val faults = mutableListOf<DetectedFault>()
         val notices = mutableListOf<String>()
+
+        // Public-permission signals first: these keep working without PRIVATE_CAR_SAFETY.
+        if (environment.night && environment.driving && snapshot.lowBeamSwitchOn == false) {
+            faults += DetectedFault(Rules.NIGHT_LIGHTS_OFF, "신호: 야간 주행 중 전조등 스위치 OFF")
+        }
+        snapshot.evBatteryPercent?.let { soc ->
+            if (soc < Rules.LOW_BATTERY_PERCENT) {
+                faults += DetectedFault(Rules.LOW_EV_BATTERY, "신호: 구동 배터리 ${soc.toInt()}% (기준 ${Rules.LOW_BATTERY_PERCENT.toInt()}%)")
+            }
+        }
 
         val parkingBrake = lit.firstOrNull { it.type in PARKING_BRAKE_TYPES }
         val abs = byType["ABS"]

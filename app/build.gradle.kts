@@ -59,6 +59,7 @@ dependencies {
     implementation(libs.vehicle.sdk)
     implementation(libs.pleos.navihelper)
     implementation(libs.pleos.tts)
+    implementation(libs.pleos.stt)
     implementation(libs.pleos.fusedlocation)
     implementation(libs.zxing.core)
 

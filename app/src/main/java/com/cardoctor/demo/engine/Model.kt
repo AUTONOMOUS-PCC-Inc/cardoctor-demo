@@ -1,7 +1,7 @@
 package com.cardoctor.demo.engine
 
 /** Part families that share environment weights (PRD 부록 "환경 가중치"). */
-enum class PartGroup { LIGHTING, WIPER, TIRE, BRAKE, STEERING, COOLING, POWER, SAFETY, GENERAL }
+enum class PartGroup { LIGHTING, WIPER, TIRE, BRAKE, STEERING, COOLING, POWER, ENERGY, SAFETY, GENERAL }
 
 /** Areas of the car diagram that can be highlighted. */
 enum class CarPart(val label: String) {
@@ -58,8 +58,16 @@ data class VehicleSnapshot(
     /** Per-wheel pressure. Missing wheel = no sensor value (the v2.1 emulator has none). */
     val tirePressure: Map<Wheel, TireReading> = emptyMap(),
     /** Per-wheel low-pressure threshold (CRITICALLY_LOW_TIRE_PRESSURE), kPa. */
-    val tireThreshold: Map<Wheel, Float> = emptyMap()
+    val tireThreshold: Map<Wheel, Float> = emptyMap(),
+    /** Gear selection (public CAR_DRIVE): PARK, REVERSE, NEUTRAL, DRIVE, … */
+    val gear: String? = null,
+    /** High-voltage battery state of charge, % (public CAR_ENERGY). */
+    val evBatteryPercent: Float? = null
 ) {
+    /** A gear that moves the car. */
+    val inMotionGear: Boolean
+        get() = gear != null && gear != "PARK" && gear != "NEUTRAL" && gear != "UNKNOWN"
+
     /** Threshold to judge a wheel against: the vehicle's own value, else a typical passenger-car one. */
     fun thresholdOf(wheel: Wheel): Float = tireThreshold[wheel] ?: DEFAULT_LOW_TIRE_KPA
 
@@ -76,7 +84,9 @@ data class Environment(
     val night: Boolean = false,
     val badWeather: Boolean = false,
     val highway: Boolean = false,
-    val longDistance: Boolean = false
+    val longDistance: Boolean = false,
+    /** The car is being driven (gear D/R or forced from the chip). Limits what the screen shows. */
+    val driving: Boolean = false
 )
 
 data class FaultRule(
