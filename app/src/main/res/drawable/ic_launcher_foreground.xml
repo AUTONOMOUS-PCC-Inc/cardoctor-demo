@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The OVERALL grade dial from the dashboard: a 270° track, a teal arc filled most of the way,
+    an ice-blue needle and a hub. Everything stays inside the 66dp adaptive-icon safe zone.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Track: 270°, from 135° to 45°, radius 22 around (54,56). -->
+    <path
+        android:pathData="M38.44,71.56 A22,22 0 1,1 69.56,71.56"
+        android:strokeColor="#33FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Glow under the filled arc. -->
+    <path
+        android:pathData="M38.44,71.56 A22,22 0 1,1 75.25,50.31"
+        android:strokeColor="#4063E0C6"
+        android:strokeWidth="11"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Filled arc (about 3/4 of the dial). -->
+    <path
+        android:pathData="M38.44,71.56 A22,22 0 1,1 75.25,50.31"
+        android:strokeColor="#FF63E0C6"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Needle pointing to the end of the filled arc. -->
+    <path
+        android:pathData="M54,56 L69.4,51.9"
+        android:strokeColor="#FF9CC9FF"
+        android:strokeWidth="3.4"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Hub. -->
+    <path
+        android:pathData="M54,56 m-4.2,0 a4.2,4.2 0 1,0 8.4,0 a4.2,4.2 0 1,0 -8.4,0"
+        android:fillColor="#FFF4F6F8" />
+
+    <!-- Ambient light strip under the dial. -->
+    <path
+        android:pathData="M45,81 L63,81"
+        android:strokeColor="#CC63E0C6"
+        android:strokeWidth="2.6"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+</vector>
