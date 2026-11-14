@@ -250,6 +250,8 @@ WebGL이나 모델을 불러올 수 없는 환경에서는 2D 평면도(`ui/CarD
   원본 라이선스 파일은 `app/src/main/assets/car3d/ioniq5/license.txt` 에 있습니다.
 - 렌더링: [three.js](https://threejs.org) r160, MIT License.
 - 서체: [Pretendard](https://github.com/orioncactus/pretendard), SIL Open Font License 1.1.
+- 지도 엔진: [MapLibre GL JS](https://maplibre.org) 4.7.1, BSD-3-Clause. 앱 안(`app/src/main/assets/map/vendor/`)에 들어 있어 실행 중에 외부 코드를 받지 않습니다. 라이선스 원문은 같은 폴더의 `LICENSE.txt`.
+- 지도 데이터·타일: © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, [OpenMapTiles](https://openmaptiles.org), 타일 제공 [OpenFreeMap](https://openfreemap.org). 지도 화면 아래에 출처를 표시합니다. 지도 그림(타일)과 글꼴은 인터넷에서 받으므로, 연결이 없으면 지도 대신 안내 문구가 뜨고 목록·안내 시작은 그대로 동작합니다.
 
 ## 알려진 제약
 
