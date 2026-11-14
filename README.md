@@ -132,6 +132,8 @@ python tools/demo_console.py
 에뮬레이터가 켜져 있으면 자동으로 연결됩니다. `adb` 는 PATH, 환경 변수 `ADB`, Android SDK 기본 위치 순으로 찾습니다.
 (Claude 데스크톱 앱 안에서 SDK를 설치했다면 SDK가 `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Local\Android\Sdk` 로 가상화되는데, 이 위치도 찾습니다.)
 
+세로(9:16) 창입니다. 위쪽 탭 **시나리오 · 고장 주입 · 앱 · 음성** 으로 조작하고, 아래 **VEHICLE STATE** 와 **LIVE LOG** 는 탭과 관계없이 항상 보입니다.
+
 | 영역 | 내용 |
 |---|---|
 | **SCENARIOS** | 누르면 기존 고장을 지우고 시나리오를 주입합니다. 오른쪽 링의 숫자는 앱에서 기대되는 등급입니다 |

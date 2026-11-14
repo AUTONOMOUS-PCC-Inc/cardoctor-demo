@@ -46,7 +46,7 @@ FAULTS = [
     ("전조등", "LEDHeadlamp", "Yellow", "낮 1등급 · 밤 3등급"),
     ("타이어 공기압", "TPMS", "Yellow", "2등급 · 비 오면 3등급"),
     ("ABS", "ABS", "Yellow", "2등급 · 비 오면 3등급"),
-    ("브레이크 경고등", "ParkingBrake", "Red", "단독은 안내 · ABS와 4등급"),
+    ("브레이크 경고등", "ParkingBrake", "Red", "ABS와 함께면 4등급"),
     ("과열", "EngineTemperature", "Red", "3등급"),
     ("저전압 배터리", "LowVoltBattery", "Red", "3등급"),
     ("조향 보조", "MDPS", "Red", "3등급"),
@@ -216,8 +216,9 @@ class DemoConsoleApp(tk.Tk):
         super().__init__()
         self.title("CarDoctor · Demo Console")
         self.configure(bg=INK)
-        self.geometry("1600x880+30+20")
-        self.minsize(1500, 820)
+        # 9:16 portrait. 880 px tall still fits a 1440 px screen at 150 % scaling with the title bar.
+        self.geometry("495x880+20+0")
+        self.minsize(450, 800)
         self.fonts = load_fonts()
 
         self.console = VirtualConsole()
@@ -229,6 +230,7 @@ class DemoConsoleApp(tk.Tk):
         self.entries: list[tuple[str, str, str]] = []   # (time, kind, text)
         self.low_tires: set[str] = set()                 # app-side values sent from here
         self.env = {key: "auto" for key, _, _ in ENV_TRISTATE}
+        self.tab = 0  # 0 시나리오 · 1 고장 주입 · 2 앱 · 음성
         self.closing = False
         self.render_pending = False
 
@@ -552,28 +554,27 @@ class DemoConsoleApp(tk.Tk):
         ambient = self.ambient()
 
         self._draw_background(w, h, ambient)
-        pad = 38
+        pad = 18
         self._draw_header(w, pad, ambient)
+        self._draw_tabs(pad, 114, w - 2 * pad)
 
-        top = 124
-        log_height = 160
-        log_top = h - 30 - log_height
-        height = log_top - 18 - top
         inner = w - 2 * pad
-        gap = 18
-        left_w = round(inner * 0.235)
-        state_w = round(inner * 0.20)
-        app_w = round(inner * 0.24)
-        mid_w = inner - left_w - state_w - app_w - 3 * gap
-        x = pad
-        self._draw_scenarios(x, top, left_w, height, ambient)
-        x += left_w + gap
-        self._draw_faults(x, top, mid_w, height, ambient)
-        x += mid_w + gap
-        self._draw_state(x, top, state_w, height, ambient)
-        x += state_w + gap
-        self._draw_app(x, top, app_w, height, ambient)
-        self._draw_log(pad, log_top, inner, log_height, ambient)
+        log_h, strip_h, gap = 120, 76, 12
+        log_top = h - pad - log_h
+        strip_top = log_top - gap - strip_h
+        top = 162
+        content_h = strip_top - gap - top
+        # The telltale pickers are real widgets: park them off-screen unless the fault tab shows them.
+        for tag in ("input_type", "input_color", "input_state"):
+            canvas.coords(tag, -500, -500)
+        if self.tab == 0:
+            self._draw_scenarios(pad, top, inner, content_h, ambient)
+        elif self.tab == 1:
+            self._draw_faults(pad, top, inner, content_h, ambient)
+        else:
+            self._draw_app(pad, top, inner, content_h, ambient)
+        self._draw_state(pad, strip_top, inner, strip_h, ambient)
+        self._draw_log(pad, log_top, inner, log_h, ambient)
         canvas.tag_raise("input")
 
     def _draw_background(self, w, h, ambient) -> None:
@@ -599,36 +600,49 @@ class DemoConsoleApp(tk.Tk):
                                     fill=mix("#030405", ambient, strength), tags=("dyn",))
 
     def _draw_header(self, w, pad, ambient) -> None:
-        self.text(pad, 48, " ".join("CARDOCTOR"), size=19, weight="light")
-        self.eyebrow(pad + 2, 82, "DEMO CONSOLE")
-        self.text(pad + 162, 82, "시연 콘솔", size=9, fill=FAINT)
+        self.text(pad, 36, " ".join("CARDOCTOR"), size=16, weight="light")
+        self.eyebrow(pad + 2, 66, "DEMO CONSOLE")
 
         x = w - pad
-        self.pill(x - 112, 34, x, 72, "화면 캡처", "btn_capture", self.capture)
-        x -= 124
-        self.pill(x - 100, 34, x, 72, "앱 실행", "btn_launch", self.launch_app)
-        x -= 118
         if self.online is True:
-            color, label = (OK, "가상 콘솔 연결됨") if self.ready else (AMBER, "연결됨 · 세션 준비 중")
+            color, label = (OK, "콘솔 연결됨") if self.ready else (AMBER, "세션 준비 중")
         elif self.online is False:
             color, label = RED, "연결 안 됨"
         else:
             color, label = AMBER, "연결 중…"
-        width = tkfont.Font(family=self.fonts["regular"], size=10).measure(label) + 46
-        self.rounded(x - width, 34, x, 72, 19, fill=mix(INK, color, 0.10), outline=mix(INK, color, 0.45), width=1,
+        width = tkfont.Font(family=self.fonts["regular"], size=9).measure(label) + 40
+        self.rounded(x - width, 20, x, 50, 15, fill=mix(INK, color, 0.10), outline=mix(INK, color, 0.45), width=1,
                      tags=("dyn",))
-        self.canvas.create_oval(x - width + 16, 49, x - width + 24, 57, fill=color, width=0, tags=("dyn",))
-        self.text(x - width + 32, 53, label, size=10, fill=BODY)
+        self.canvas.create_oval(x - width + 14, 31, x - width + 22, 39, fill=color, width=0, tags=("dyn",))
+        self.text(x - width + 29, 35, label, size=9, fill=BODY)
+        self.pill(x - 84, 56, x, 82, "화면 캡처", "btn_capture", self.capture, size=9)
+        self.pill(x - 164, 56, x - 92, 82, "앱 실행", "btn_launch", self.launch_app, size=9)
 
-        self.canvas.create_line(pad, 104, w - pad, 104, fill=mix(INK, TEXT, 0.10), tags=("dyn",))
+        self.canvas.create_line(pad, 98, w - pad, 98, fill=mix(INK, TEXT, 0.10), tags=("dyn",))
+
+    def _draw_tabs(self, x, y, w) -> None:
+        labels = ["시나리오", "고장 주입", "앱 · 음성"]
+        gap = 8
+        tab_w = (w - gap * 2) / 3
+        for index, label in enumerate(labels):
+            tx = x + index * (tab_w + gap)
+            if index == self.tab:
+                self.pill(tx, y, tx + tab_w, y + 36, label, f"tab{index}", lambda i=index: self.set_tab(i),
+                          fill=mix(ROW, ACCENT, 0.22), outline=ACCENT, color=TEXT, size=10)
+            else:
+                self.pill(tx, y, tx + tab_w, y + 36, label, f"tab{index}", lambda i=index: self.set_tab(i), size=10)
+
+    def set_tab(self, index: int) -> None:
+        self.tab = index
+        self.request_render()
 
     def _scenario_active(self, types, rain) -> bool:
         return self.online is True and set(self.lit) == set(types) and (self.wiper_mode != "Off") == rain
 
     def _draw_scenarios(self, x, y, w, h, ambient) -> None:
         self.panel(x, y, w, h, "SCENARIOS", ambient)
-        row_h, gap = 48, 6
-        top = y + 48
+        row_h, gap = 46, 6
+        top = y + 46
         for index, (name, description, types, rain, grade) in enumerate(SCENARIOS):
             ry = top + index * (row_h + gap)
             if ry + row_h > y + h - 66:
@@ -657,8 +671,8 @@ class DemoConsoleApp(tk.Tk):
 
     def _draw_faults(self, x, y, w, h, ambient) -> None:
         self.panel(x, y, w, h, "FAULT INJECTION", ambient)
-        self.text(x + w - 24, y + 28, "불이 켜진 항목 = 차량이 실제로 보고하는 상태", size=9, fill=FAINT, anchor="e")
-        columns, gap, row_h = 2, 10, 58
+        self.text(x + w - 24, y + 28, "불 = 차량이 보고한 상태", size=9, fill=FAINT, anchor="e")
+        columns, gap, row_h = 2, 8, 52
         cell_w = (w - 32 - gap * (columns - 1)) / columns
         top = y + 50
         for index, (label, console_type, color_name, effect) in enumerate(FAULTS):
@@ -683,8 +697,8 @@ class DemoConsoleApp(tk.Tk):
                                         fill=mix(ROW, color, 0.45), tags=("dyn", tag))
             self.canvas.create_oval(dot_x - 5, dot_y - 5, dot_x + 5, dot_y + 5, width=0 if on else 1.5,
                                     fill=color if on else "", outline=mix(ROW, TEXT, 0.35), tags=("dyn", tag))
-            self.text(cx + 44, cy + 20, label, size=11, weight="medium", tags=("dyn", tag))
-            self.text(cx + 44, cy + 40, effect, size=9, fill=mix(MUTED, color, 0.35) if on else MUTED, tags=("dyn", tag))
+            self.text(cx + 44, cy + 18, label, size=11, weight="medium", tags=("dyn", tag))
+            self.text(cx + 44, cy + 36, effect, size=9, fill=mix(MUTED, color, 0.35) if on else MUTED, tags=("dyn", tag))
             self.clickable(tag, lambda t=console_type: self.toggle(t), outline, mix(outline, TEXT, 0.45))
 
         # Any other telltale the console knows about.
@@ -693,55 +707,37 @@ class DemoConsoleApp(tk.Tk):
         self.eyebrow(x + 24, base + 2, "OTHER TELLTALES")
         row_y = base + 30
         self.canvas.coords("input_type", x + 24, row_y)
-        self.canvas.coords("input_color", x + 24 + 196, row_y)
-        self.canvas.coords("input_state", x + 24 + 196 + 96, row_y)
-        self.pill(x + w - 96, row_y - 17, x + w - 20, row_y + 17, "적용", "btn_apply", self.apply_custom)
+        self.canvas.coords("input_color", x + 24 + 160, row_y)
+        self.canvas.coords("input_state", x + 24 + 160 + 96, row_y)
+        self.pill(x + w - 76, row_y - 17, x + w - 16, row_y + 17, "적용", "btn_apply", self.apply_custom)
 
     def _draw_state(self, x, y, w, h, ambient) -> None:
-        self.panel(x, y, w, h, "VEHICLE STATE", ambient)
+        """Compact strip: a status ring, the headline and what is lit right now."""
+        self.rounded(x, y, x + w, y + h, 18, fill=mix(PANEL, ambient, 0.045), outline=EDGE, width=1, tags=("dyn",))
         canvas = self.canvas
         count = len(self.lit)
-        cx, cy, radius = x + 78, y + 112, 46
-        canvas.create_arc(cx - radius, cy - radius, cx + radius, cy + radius, start=-45, extent=270, style="arc",
-                          width=5, outline=mix(PANEL, TEXT, 0.10), tags=("dyn",))
-        fraction = 1.0 if count == 0 and self.online else min(count, 6) / 6
-        if self.online is True and fraction > 0:
-            for width, strength in ((11, 0.22), (5, 1.0)):   # glow, then the arc itself
-                canvas.create_arc(cx - radius, cy - radius, cx + radius, cy + radius, start=225, extent=-270 * fraction,
-                                  style="arc", width=width, outline=mix(mix(PANEL, ambient, 0.045), ambient, strength),
-                                  tags=("dyn",))
+        cx, cy, radius = x + 40, y + h / 2, 22
+        canvas.create_oval(cx - radius, cy - radius, cx + radius, cy + radius, width=3,
+                           outline=mix(PANEL, TEXT, 0.10), tags=("dyn",))
+        if self.online is True:
+            fraction = 1.0 if count == 0 else min(count, 6) / 6
+            canvas.create_arc(cx - radius, cy - radius, cx + radius, cy + radius, start=90, extent=-359.9 * fraction,
+                              style="arc", width=3, outline=ambient, tags=("dyn",))
         number = "–" if self.online is not True else ("OK" if count == 0 else str(count))
-        self.text(cx, cy - 4, number, size=17 if number == "OK" else 26, weight="light", fill=ambient, anchor="center")
-        self.eyebrow(cx, cy + 22, "ACTIVE" if count else "STATUS", anchor="center")
+        self.text(cx, cy, number, size=10 if number == "OK" else 14, weight="light", fill=ambient, anchor="center")
 
-        tx = x + 146
+        tx = x + 78
         if self.online is not True:
             headline, detail = "연결 대기", "에뮬레이터를 찾는 중입니다"
         elif count == 0:
-            headline, detail = "정상", "켜진 경고등이 없습니다"
+            headline, detail = "정상 · 켜진 경고등 없음", ""
         else:
-            headline, detail = f"경고등 {count}개", "차량이 보고하는 상태입니다"
-        self.text(tx, y + 96, headline, size=17, weight="light")
-        self.text(tx, y + 124, detail, size=9, fill=MUTED)
+            headline, detail = f"경고등 {count}개", ", ".join(sorted(self.lit))
+        self.eyebrow(tx, y + 18, "VEHICLE STATE")
+        self.text(tx, y + 40, headline, size=12, weight="medium")
         wiper_on = self.wiper_mode != "Off"
-        self.text(tx, y + 146, f"앞 와이퍼  {self.wiper_mode}", size=9, fill=ACCENT if wiper_on else FAINT)
-
-        canvas.create_line(x + 24, y + 184, x + w - 24, y + 184, fill=mix(PANEL, TEXT, 0.07), tags=("dyn",))
-        self.eyebrow(x + 24, y + 206, "LIT TELLTALES")
-        row_y = y + 232
-        for name, value in sorted(self.lit.items()):
-            if row_y + 30 > y + h - 16:
-                self.text(x + 24, row_y + 4, "…", size=11, fill=MUTED)
-                break
-            color = LAMP.get(value.get("color"), RED)
-            self.rounded(x + 16, row_y - 14, x + w - 16, row_y + 16, 15, fill=mix(ROW, color, 0.10),
-                         outline=mix(ROW, color, 0.35), width=1, tags=("dyn",))
-            canvas.create_oval(x + 30, row_y - 3, x + 38, row_y + 5, fill=color, width=0, tags=("dyn",))
-            self.text(x + 48, row_y + 1, name, size=10, weight="medium")
-            self.text(x + w - 30, row_y + 1, f"{value.get('state')} · {value.get('color')}", size=9, fill=MUTED, anchor="e")
-            row_y += 38
-        if not self.lit:
-            self.text(x + 24, row_y, "없음", size=10, fill=FAINT)
+        line = "  ·  ".join(t for t in (detail, f"앞 와이퍼 {self.wiper_mode}") if t)
+        self.text(tx, y + 60, line, size=9, fill=ACCENT if wiper_on and not detail else MUTED, width=w - 96)
 
     def _toggle_pill(self, x1, y1, x2, y2, label, tag, command, on: bool, color: str, size=10) -> None:
         if on:
@@ -770,7 +766,7 @@ class DemoConsoleApp(tk.Tk):
         self.pill(left, cy, left + inner, cy + ph, "타이어 시연값 해제", "tire_clear", self.clear_tires, size=9)
 
         # Driving context
-        cy += step + 22
+        cy += step + 18
         self.eyebrow(left, cy, "DRIVING CONTEXT")
         cy += 16
         for index, (key, on_label, off_label) in enumerate(ENV_TRISTATE):
@@ -790,7 +786,7 @@ class DemoConsoleApp(tk.Tk):
         self.pill(left + half + 8, cy, left + inner, cy + ph, "자동으로 복귀", "env_reset", self.reset_env, size=9)
 
         # Voice
-        cy += step + 22
+        cy += step + 18
         self.eyebrow(left, cy, "VOICE · 질문 시연")
         cy += 16
         for index, question in enumerate(VOICE_SAMPLES):
@@ -803,17 +799,19 @@ class DemoConsoleApp(tk.Tk):
 
     def _draw_log(self, x, y, w, h, ambient) -> None:
         self.panel(x, y, w, h, "LIVE LOG", ambient)
-        self.text(x + w - 24, y + 28, "도구 · 차량 · 앱 판정을 시간순으로", size=9, fill=FAINT, anchor="e")
+        self.text(x + w - 24, y + 28, "최신순", size=9, fill=FAINT, anchor="e")
         kinds = {"inject": ("주입", ACCENT), "vehicle": ("차량", OK), "app": ("앱", AMBER), "info": ("정보", MUTED),
                  "error": ("오류", RED)}
-        line_h = 22
-        rows = max(1, (h - 62) // line_h)
-        ly = y + 56
+        line_h = 18
+        rows = max(1, (h - 52) // line_h)
+        ly = y + 50
         for moment, kind, message in reversed(self.entries[-rows:]):   # newest first
             tag, color = kinds.get(kind, ("정보", MUTED))
-            self.text(x + 24, ly, moment, size=9, fill=FAINT)
-            self.text(x + 96, ly, tag, size=9, weight="semi", fill=color)
-            self.text(x + 138, ly, message, size=10, fill=BODY)
+            self.text(x + 18, ly, moment[:5], size=8, fill=FAINT)
+            self.text(x + 66, ly, tag, size=8, weight="semi", fill=color)
+            # One line per entry; long messages are cut to the panel width.
+            room = max(10, int((w - 118) / 7.2))
+            self.text(x + 100, ly, message if len(message) <= room else message[:room - 1] + "…", size=9, fill=BODY)
             ly += line_h
 
     def _make_inputs(self) -> None:
@@ -831,7 +829,7 @@ class DemoConsoleApp(tk.Tk):
         self.type_var = tk.StringVar()
         self.color_var = tk.StringVar(value="Red")
         self.state_var = tk.StringVar(value="On")
-        self.type_box = ttk.Combobox(self, textvariable=self.type_var, state="readonly", width=20,
+        self.type_box = ttk.Combobox(self, textvariable=self.type_var, state="readonly", width=14,
                                      font=self.font(10), style="Dark.TCombobox")
         color_box = ttk.Combobox(self, textvariable=self.color_var, state="readonly", width=8, font=self.font(10),
                                  style="Dark.TCombobox", values=["Red", "Yellow", "Green", "Blue", "White", "Gray"])
