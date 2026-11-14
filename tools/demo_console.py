@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """카닥터 시연 콘솔 — Pleos Connect 에뮬레이터에 고장을 주입하는 GUI 도구.
 
-에뮬레이터의 Virtual Console(기기 포트 8088)에 HTTP로 값을 넣는다. 표준 라이브러리(tkinter, urllib)만 쓴다.
+에뮬레이터의 Virtual Console(기기 포트 8088)에 HTTP로 경고등·와이퍼 값을 넣는다. 앱 안에만 있는 값(바퀴별
+타이어 시연값, 주행 환경, 음성 질문 예시)은 adb 브로드캐스트로 앱의 DemoCommandReceiver에 보낸다.
+앱이 판단한 결과는 logcat(CarDoctorLog)으로 받아 LIVE LOG에 함께 보여 준다. 앱에는 시연용 화면이 없다.
+표준 라이브러리(tkinter, urllib)만 쓴다.
 
     python tools/demo_console.py
 
@@ -64,6 +67,21 @@ SCENARIOS = [
 
 DEFAULT_COLOR = {t: c for _, t, c, _ in FAULTS if t}
 
+APP_PACKAGE = "com.cardoctor.demo"
+APP_RECEIVER = f"{APP_PACKAGE}/.demo.DemoCommandReceiver"
+APP_ACTION = f"{APP_PACKAGE}.DEMO"
+
+# (화면 이름, 앱의 Wheel 이름)
+WHEELS = [("앞 왼쪽", "LEFT_FRONT"), ("앞 오른쪽", "RIGHT_FRONT"), ("뒤 왼쪽", "LEFT_REAR"), ("뒤 오른쪽", "RIGHT_REAR")]
+
+# 앱의 VoiceCommands.SAMPLES 순서와 같아야 한다 (adb로 한글을 넘기기 어려워 번호로 보낸다).
+VOICE_SAMPLES = ["지금 정비소 가야 돼?", "왜 위험해?", "정비소 안내해줘", "리포트 보여줘"]
+
+# 3단 전환: 자동 → 강제 ON → 강제 OFF → 자동
+ENV_TRISTATE = [("driving", "주행", "정차"), ("night", "밤", "낮"), ("weather", "비·눈", "맑음")]
+ENV_SWITCH = [("highway", "고속도로"), ("long", "50km 이상")]
+APP_LOG_KINDS = {"INJECT": "주입", "SIGNAL": "신호", "JUDGE": "판정", "ENVIRONMENT": "환경", "OVERALL": "종합"}
+
 # ---- palette (same as the app's ui/Palette.kt) ----
 INK = "#06080b"
 PANEL = "#0f1319"
@@ -82,6 +100,8 @@ def mix(a: str, b: str, t: float) -> str:
 
 
 def find_adb() -> str | None:
+    if os.environ.get("ADB") and Path(os.environ["ADB"]).is_file():
+        return os.environ["ADB"]
     found = shutil.which("adb")
     if found:
         return found
@@ -91,6 +111,8 @@ def find_adb() -> str | None:
             candidates.append(Path(os.environ[variable]) / "platform-tools")
     if os.environ.get("LOCALAPPDATA"):
         candidates.append(Path(os.environ["LOCALAPPDATA"]) / "Android" / "Sdk" / "platform-tools")
+        # An SDK installed from inside a packaged (MSIX) app is virtualized there; other processes see it here.
+        candidates += sorted(Path(os.environ["LOCALAPPDATA"]).glob("Packages/*/LocalCache/Local/Android/Sdk/platform-tools"))
     candidates.append(Path.home() / "Library" / "Android" / "sdk" / "platform-tools")
     candidates.append(Path.home() / "Android" / "Sdk" / "platform-tools")
     for folder in candidates:
@@ -144,6 +166,21 @@ class VirtualConsole:
     def set_wiper(self, mode: str) -> int:
         return self._request("PUT", f"/vehicle/body?front_wiper={mode}")[0]
 
+    def app_command(self, cmd: str, **extras) -> bool:
+        """Broadcast to the app's DemoCommandReceiver (guarded by DUMP, which the adb shell holds)."""
+        args = ["shell", "am", "broadcast", "--user", "current", "-n", APP_RECEIVER, "-a", APP_ACTION,
+                "--es", "cmd", cmd]
+        for key, value in extras.items():
+            if isinstance(value, bool):
+                args += ["--ez", key, "true" if value else "false"]
+            elif isinstance(value, int):
+                args += ["--ei", key, str(value)]
+            else:
+                args += ["--es", key, str(value)]
+        result = self.run_adb(*args)
+        output = (result.stdout + result.stderr).decode(errors="replace")
+        return result.returncode == 0 and "Broadcast completed" in output
+
     def screenshot(self) -> Path:
         result = self.run_adb("exec-out", "screencap", "-p", timeout=30)
         if result.returncode != 0 or not result.stdout:
@@ -179,8 +216,8 @@ class DemoConsoleApp(tk.Tk):
         super().__init__()
         self.title("CarDoctor · Demo Console")
         self.configure(bg=INK)
-        self.geometry("1280x860")
-        self.minsize(1180, 780)
+        self.geometry("1600x880+30+20")
+        self.minsize(1500, 820)
         self.fonts = load_fonts()
 
         self.console = VirtualConsole()
@@ -190,6 +227,8 @@ class DemoConsoleApp(tk.Tk):
         self.lit: dict[str, dict] = {}
         self.wiper_mode = "Off"
         self.entries: list[tuple[str, str, str]] = []   # (time, kind, text)
+        self.low_tires: set[str] = set()                 # app-side values sent from here
+        self.env = {"driving": "auto", "night": "auto", "weather": "auto", "highway": "off", "long": "off"}
         self.closing = False
         self.render_pending = False
 
@@ -199,6 +238,7 @@ class DemoConsoleApp(tk.Tk):
         self.canvas.bind("<Configure>", lambda _event: self.request_render())
 
         threading.Thread(target=self._worker, daemon=True).start()
+        threading.Thread(target=self._app_log_reader, daemon=True).start()
         self.protocol("WM_DELETE_WINDOW", self._close)
         self.log("info", "도구 시작. 에뮬레이터에 연결하는 중…")
         self.submit(self._load_types)
@@ -228,6 +268,30 @@ class DemoConsoleApp(tk.Tk):
         if self.jobs.qsize() < 3:  # do not pile up polls while the emulator is unreachable
             self.submit(self._refresh)
         self.after(1000, self._poll)
+
+    def _app_log_reader(self) -> None:
+        """Streams the app's monitor log (logcat tag CarDoctorLog) into LIVE LOG; reconnects on its own."""
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        while not self.closing:
+            if not self.console.adb:
+                return
+            try:
+                process = subprocess.Popen(
+                    [self.console.adb, "logcat", "-v", "brief", "-T", "1", "-s", "CarDoctorLog:I"],
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=flags)
+                for raw in process.stdout:
+                    if self.closing:
+                        process.kill()
+                        return
+                    line = raw.decode("utf-8", errors="replace").strip()
+                    if "CarDoctorLog" not in line or "):" not in line:
+                        continue
+                    body = line.split("):", 1)[1].strip()
+                    kind, _, text = body.partition("|")
+                    self.ui(self.log, "app", f"[{APP_LOG_KINDS.get(kind, kind)}] {text}")
+            except Exception:
+                pass
+            time.sleep(3)
 
     def _refresh(self) -> None:
         try:
@@ -296,6 +360,8 @@ class DemoConsoleApp(tk.Tk):
             for name in sorted(set(self.lit) | set(DEFAULT_COLOR)):
                 self.console.set_telltale(name, "Off", DEFAULT_COLOR.get(name, "Red"))
             self.console.set_wiper("Off")
+            self.console.app_command("tires_clear")
+            self.ui(self._set_tires, set())
             if announce:
                 self.ui(self.log, "inject", "모든 고장 해제")
 
@@ -311,6 +377,55 @@ class DemoConsoleApp(tk.Tk):
             self.ui(self._log_result, f"시나리오 · {name}", next((s for s in statuses if s != 200), 200))
 
         self.submit(job)
+
+    # ----- app-side values (adb broadcast) -----
+
+    def _send_app(self, label: str, cmd: str, **extras) -> None:
+        def job() -> None:
+            ok = self.console.app_command(cmd, **extras)
+            self.ui(self.log, "inject" if ok else "error",
+                    f"앱 · {label}" if ok else f"앱 · {label} 실패. 앱이 설치·실행 중인지 확인하세요.")
+
+        self.submit(job)
+
+    def _set_tires(self, tires: set) -> None:
+        self.low_tires = tires
+        self.request_render()
+
+    def toggle_tire(self, wheel: str, label: str) -> None:
+        low = wheel not in self.low_tires
+        self._set_tires(self.low_tires | {wheel} if low else self.low_tires - {wheel})
+        self._send_app(f"{label} 타이어 {'저압' if low else '정상'} (시연값)", "tire", wheel=wheel, low=low)
+
+    def clear_tires(self) -> None:
+        self._set_tires(set())
+        self._send_app("타이어 시연값 해제", "tires_clear")
+
+    def cycle_env(self, key: str, on_label: str, off_label: str) -> None:
+        value = {"auto": "on", "on": "off", "off": "auto"}[self.env[key]]
+        self.env[key] = value
+        self.request_render()
+        shown = {"auto": "자동", "on": f"{on_label} (강제)", "off": f"{off_label} (강제)"}[value]
+        self._send_app(f"{on_label}/{off_label} → {shown}", "env", key=key, value=value)
+
+    def toggle_env(self, key: str, label: str) -> None:
+        value = "off" if self.env[key] == "on" else "on"
+        self.env[key] = value
+        self.request_render()
+        self._send_app(f"{label} {'켬' if value == 'on' else '끔'}", "env", key=key, value=value)
+
+    def lock_env(self) -> None:
+        self.env.update(night="off", weather="off", highway="off", long="off")
+        self.request_render()
+        self._send_app("시연 환경 고정 (낮 · 맑음)", "env_lock")
+
+    def reset_env(self) -> None:
+        self.env = {key: ("auto" if key in ("driving", "night", "weather") else "off") for key in self.env}
+        self.request_render()
+        self._send_app("주행 환경 자동 복귀", "env_reset")
+
+    def ask(self, index: int) -> None:
+        self._send_app(f"음성 질문 '{VOICE_SAMPLES[index]}'", "ask", q=index)
 
     def launch_app(self) -> None:
         def job() -> None:
@@ -447,17 +562,23 @@ class DemoConsoleApp(tk.Tk):
         self._draw_header(w, pad, ambient)
 
         top = 124
-        log_height = 172
+        log_height = 160
         log_top = h - 30 - log_height
         height = log_top - 18 - top
         inner = w - 2 * pad
         gap = 18
-        left_w = round(inner * 0.29)
-        right_w = round(inner * 0.27)
-        mid_w = inner - left_w - right_w - 2 * gap
-        self._draw_scenarios(pad, top, left_w, height, ambient)
-        self._draw_faults(pad + left_w + gap, top, mid_w, height, ambient)
-        self._draw_state(pad + left_w + gap + mid_w + gap, top, right_w, height, ambient)
+        left_w = round(inner * 0.235)
+        state_w = round(inner * 0.20)
+        app_w = round(inner * 0.24)
+        mid_w = inner - left_w - state_w - app_w - 3 * gap
+        x = pad
+        self._draw_scenarios(x, top, left_w, height, ambient)
+        x += left_w + gap
+        self._draw_faults(x, top, mid_w, height, ambient)
+        x += mid_w + gap
+        self._draw_state(x, top, state_w, height, ambient)
+        x += state_w + gap
+        self._draw_app(x, top, app_w, height, ambient)
         self._draw_log(pad, log_top, inner, log_height, ambient)
         canvas.tag_raise("input")
 
@@ -628,10 +749,71 @@ class DemoConsoleApp(tk.Tk):
         if not self.lit:
             self.text(x + 24, row_y, "없음", size=10, fill=FAINT)
 
+    def _toggle_pill(self, x1, y1, x2, y2, label, tag, command, on: bool, color: str, size=10) -> None:
+        if on:
+            self.pill(x1, y1, x2, y2, label, tag, command, fill=mix(ROW, color, 0.22), outline=color, color=TEXT,
+                      size=size)
+        else:
+            self.pill(x1, y1, x2, y2, label, tag, command, size=size)
+
+    def _draw_app(self, x, y, w, h, ambient) -> None:
+        """Values that live only inside the app: sent over adb, so the app needs no demo UI."""
+        self.panel(x, y, w, h, "APP · 앱 안의 값", ambient)
+        left, inner, ph, step = x + 18, w - 36, 32, 40
+        half = (inner - 8) / 2
+        third = (inner - 16) / 3
+
+        # Tires
+        cy = y + 58
+        self.eyebrow(left, cy, "TIRE PRESSURE · 시연값")
+        cy += 16
+        for index, (label, wheel) in enumerate(WHEELS):
+            px = left + (index % 2) * (half + 8)
+            py = cy + (index // 2) * step
+            self._toggle_pill(px, py, px + half, py + ph, f"{label} 저압", f"tire{index}",
+                              lambda wh=wheel, lb=label: self.toggle_tire(wh, lb), wheel in self.low_tires, AMBER, size=9)
+        cy += 2 * step
+        self.pill(left, cy, left + inner, cy + ph, "타이어 시연값 해제", "tire_clear", self.clear_tires, size=9)
+
+        # Driving context
+        cy += step + 22
+        self.eyebrow(left, cy, "DRIVING CONTEXT")
+        cy += 16
+        for index, (key, on_label, off_label) in enumerate(ENV_TRISTATE):
+            value = self.env[key]
+            label = {"auto": f"{on_label}/{off_label} 자동", "on": f"{on_label} · 강제", "off": f"{off_label} · 강제"}[value]
+            px = left + index * (third + 8)
+            self._toggle_pill(px, cy, px + third, cy + ph, label, f"env_{key}",
+                              lambda k=key, a=on_label, b=off_label: self.cycle_env(k, a, b), value != "auto",
+                              ACCENT, size=9)
+        cy += step
+        for index, (key, label) in enumerate(ENV_SWITCH):
+            px = left + index * (half + 8)
+            self._toggle_pill(px, cy, px + half, cy + ph, label, f"env_{key}",
+                              lambda k=key, lb=label: self.toggle_env(k, lb), self.env[key] == "on", ACCENT, size=9)
+        cy += step
+        locked = self.env["night"] == "off" and self.env["weather"] == "off"
+        self._toggle_pill(left, cy, left + half, cy + ph, "시연 환경 고정", "env_lock", self.lock_env, locked, OK,
+                          size=9)
+        self.pill(left + half + 8, cy, left + inner, cy + ph, "자동으로 복귀", "env_reset", self.reset_env, size=9)
+
+        # Voice
+        cy += step + 22
+        self.eyebrow(left, cy, "VOICE · 질문 시연")
+        cy += 16
+        for index, question in enumerate(VOICE_SAMPLES):
+            px = left + (index % 2) * (half + 8)
+            py = cy + (index // 2) * step
+            self.pill(px, py, px + half, py + ph, question, f"ask{index}", lambda i=index: self.ask(i), size=9)
+        cy += 2 * step + 6
+        if cy < y + h - 12:
+            self.text(left, cy, "에뮬레이터는 마이크 입력이 없어 버튼으로 질문", size=8, fill=FAINT)
+
     def _draw_log(self, x, y, w, h, ambient) -> None:
         self.panel(x, y, w, h, "LIVE LOG", ambient)
-        self.text(x + w - 24, y + 28, "낮/밤 · 도로 조건은 앱 화면의 칩으로 바꿉니다", size=9, fill=FAINT, anchor="e")
-        kinds = {"inject": ("주입", ACCENT), "vehicle": ("차량", OK), "info": ("정보", MUTED), "error": ("오류", RED)}
+        self.text(x + w - 24, y + 28, "도구 · 차량 · 앱 판정을 시간순으로", size=9, fill=FAINT, anchor="e")
+        kinds = {"inject": ("주입", ACCENT), "vehicle": ("차량", OK), "app": ("앱", AMBER), "info": ("정보", MUTED),
+                 "error": ("오류", RED)}
         line_h = 22
         rows = max(1, (h - 62) // line_h)
         ly = y + 56

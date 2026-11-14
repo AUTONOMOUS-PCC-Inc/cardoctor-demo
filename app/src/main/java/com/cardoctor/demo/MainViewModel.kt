@@ -4,9 +4,8 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.cardoctor.demo.demo.DemoConsole
-import com.cardoctor.demo.demo.DemoFault
-import com.cardoctor.demo.demo.LogEntry
+import com.cardoctor.demo.demo.DemoBus
+import com.cardoctor.demo.demo.DemoCommand
 import com.cardoctor.demo.demo.LogKind
 import com.cardoctor.demo.engine.Diagnosis
 import com.cardoctor.demo.engine.DiagnosisReport
@@ -65,12 +64,8 @@ data class EnvironmentControls(
         get() = night != Override.AUTO || weather != Override.AUTO || highway || longDistance || driving != Override.AUTO
 }
 
-/** State of the demo console (debug builds only). */
+/** Values set from the PC demo tool that exist only inside the app (see demo/DemoCommands.kt). */
 data class DemoState(
-    val available: Boolean = false,
-    val open: Boolean = false,
-    val consoleOnline: Boolean = false,
-    val log: List<LogEntry> = emptyList(),
     /** F1 demo: wheels whose pressure is simulated as low. */
     val lowTires: Set<Wheel> = emptySet()
 )
@@ -130,10 +125,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val connected = MutableStateFlow(false)
     private val clockNight = MutableStateFlow(isNightNow())
 
-    private val console = DemoConsole()
-    private val demo = MutableStateFlow(DemoState(available = BuildConfig.DEBUG))
+    private val demo = MutableStateFlow(DemoState())
     private val assist = MutableStateFlow(Assist())
-    private var nextLogId = 0L
     private var lastInjectionAt = 0L
 
     private val speaker = Speaker(application)
@@ -199,16 +192,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 onReport(current)
             }
         }
-        // The Virtual Console accepts writes only while a session heartbeat is alive.
-        viewModelScope.launch {
-            while (isActive) {
-                if (demo.value.open) {
-                    val online = console.heartbeat()
-                    demo.update { it.copy(consoleOnline = online) }
-                }
-                delay(1_000)
-            }
-        }
+        // Demo control from the PC tool (adb broadcast → DemoCommandReceiver).
+        viewModelScope.launch { DemoBus.commands.collect(::onDemoCommand) }
         // F4/F7: position → weather and nearby places. Re-search after moving about 1 km.
         viewModelScope.launch {
             var searchedAt: Position? = null
@@ -240,8 +225,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun cycleDriving() = controls.update { it.copy(driving = it.driving.next()) }
 
-    /** One tap before filming: day, clear weather, parked — so live weather cannot change grades. */
-    fun lockDemoEnvironment() {
+    /** Before filming (PC tool): day, clear weather — so live weather and the clock cannot change grades. */
+    private fun lockDemoEnvironment() {
         controls.update { it.copy(night = Override.FORCE_OFF, weather = Override.FORCE_OFF, highway = false, longDistance = false) }
         log(LogKind.ENVIRONMENT, "시연 환경 고정: 낮 · 맑음 (날씨 API 무시)")
     }
@@ -342,40 +327,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ---- Demo console -----------------------------------------------------------------------
+    // ---- Demo control (PC tool) -------------------------------------------------------------
 
-    fun toggleDemo() = demo.update { it.copy(open = !it.open) }
-
-    fun toggleDemoTire(wheel: Wheel) {
-        demo.update { it.copy(lowTires = if (wheel in it.lowTires) it.lowTires - wheel else it.lowTires + wheel) }
-        log(LogKind.INJECT, "${wheel.label} 타이어 공기압 ${if (wheel in demo.value.lowTires) "저하" else "정상"} (시연값)")
-    }
-
-    fun inject(fault: DemoFault, on: Boolean) {
-        viewModelScope.launch {
-            lastInjectionAt = System.currentTimeMillis()
-            val status = console.set(fault, on)
-            val action = if (on) "켜기" else "끄기"
-            log(
-                LogKind.INJECT,
-                when (status) {
-                    200 -> "${fault.label} $action 요청 → 가상 콘솔 수락"
-                    -1 -> "${fault.label} $action 실패 · 가상 콘솔에 연결할 수 없음"
-                    503 -> "${fault.label} $action 실패 · 콘솔 세션 준비 중, 잠시 후 다시 시도"
-                    else -> "${fault.label} $action 실패 · HTTP $status"
-                }
-            )
+    private fun onDemoCommand(command: DemoCommand) {
+        lastInjectionAt = System.currentTimeMillis()
+        when (command) {
+            is DemoCommand.Tire -> {
+                demo.update { it.copy(lowTires = if (command.low) it.lowTires + command.wheel else it.lowTires - command.wheel) }
+                log(LogKind.INJECT, "${command.wheel.label} 타이어 공기압 ${if (command.low) "저하" else "정상"} (시연값)")
+            }
+            DemoCommand.ClearTires -> {
+                demo.update { it.copy(lowTires = emptySet()) }
+                log(LogKind.INJECT, "타이어 시연값 모두 해제")
+            }
+            is DemoCommand.Env -> setEnvironment(command.key, command.value)
+            DemoCommand.LockEnvironment -> lockDemoEnvironment()
+            DemoCommand.ResetEnvironment -> {
+                controls.value = EnvironmentControls()
+                log(LogKind.ENVIRONMENT, "주행 환경 자동으로 복귀")
+            }
+            is DemoCommand.Ask -> VoiceCommands.SAMPLES.getOrNull(command.index)?.let(::answer)
         }
     }
 
-    fun clearAllFaults() {
-        viewModelScope.launch {
-            // Logged and timed before the requests go out, so the signals that follow line up.
-            lastInjectionAt = System.currentTimeMillis()
-            log(LogKind.INJECT, "모든 고장 해제 요청")
-            demo.update { it.copy(lowTires = emptySet()) }
-            DemoFault.entries.forEach { console.set(it, false) }
+    private fun setEnvironment(key: String, value: String) {
+        val override = when (value) {
+            "on" -> Override.FORCE_ON
+            "off" -> Override.FORCE_OFF
+            else -> Override.AUTO
         }
+        controls.update {
+            when (key) {
+                "night" -> it.copy(night = override)
+                "weather" -> it.copy(weather = override)
+                "driving" -> it.copy(driving = override)
+                "highway" -> it.copy(highway = value == "on")
+                "long" -> it.copy(longDistance = value == "on")
+                else -> it
+            }
+        }
+        log(LogKind.ENVIRONMENT, "환경 설정: $key = $value")
     }
 
     fun onLocationPermission() = location.retry()
@@ -511,8 +502,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun log(kind: LogKind, text: String) {
-        val entry = LogEntry(nextLogId++, System.currentTimeMillis(), kind, text)
-        demo.update { it.copy(log = (listOf(entry) + it.log).take(MAX_LOG)) }
+        Log.i(MONITOR_TAG, "${kind.name}|$text")
     }
 
     private fun Override.next(): Override = when (this) {
@@ -536,7 +526,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         const val TAG = "MainViewModel"
         const val POLL_MILLIS = 500L
-        const val MAX_LOG = 80
+        const val MONITOR_TAG = "CarDoctorLog"
         const val WEATHER_MILLIS = 10 * 60_000L
         const val SPEAK_FROM_GRADE = 3
         const val SPEECH_WAIT_MILLIS = 4_000L

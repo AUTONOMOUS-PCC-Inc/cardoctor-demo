@@ -72,7 +72,7 @@ adb shell am start -n com.cardoctor.demo/.MainActivity
 ./gradlew testDebugUnitTest
 ```
 
-판정 엔진의 단위 테스트 13개를 실행합니다. 에뮬레이터 없이도 돌아갑니다.
+판정 엔진·음성 해석의 단위 테스트 25개를 실행합니다. 에뮬레이터 없이도 돌아갑니다.
 
 ## 앱 사용 방법
 
@@ -110,35 +110,18 @@ adb shell am start -n com.cardoctor.demo/.MainActivity
 
 ## 고장 주입 방법
 
-실제 고장을 낼 수 없으므로 에뮬레이터의 Virtual Console(기기 포트 8088)에 고장 신호를 넣습니다.
-세 가지 방법이 있고 섞어 써도 됩니다. 어느 쪽에서 넣든 앱은 SDK로 읽힌 값에만 반응합니다.
+실제 고장을 낼 수 없으므로 PC에서 고장 신호를 넣습니다. **앱에는 시연용 화면이 없습니다.** 시연 중에도 앱은 실차에서와 같은 화면만 보여 줍니다.
+
+- 경고등과 와이퍼는 에뮬레이터의 Virtual Console(기기 포트 8088)에 넣습니다. 앱은 SDK로 읽힌 값에만 반응합니다.
+- 차량 신호가 아닌 앱 안의 값(바퀴별 타이어 시연값, 주행 환경, 음성 질문 예시)은 adb 브로드캐스트로 앱에 보냅니다.
+  받는 쪽(`demo/DemoCommands.kt`의 `DemoCommandReceiver`)은 `android.permission.DUMP`로 막혀 있어 adb 셸만 보낼 수 있고, 차 안의 다른 앱은 보낼 수 없습니다.
 
 | 방법 | 쓰기 좋은 때 |
 |---|---|
-| ① 앱 안의 DEMO 패널 | 주입부터 판정까지의 과정을 앱 화면에서 함께 보여줄 때 |
-| ② GUI 시연 콘솔 (PC) | 앱 화면은 깨끗하게 두고 PC에서 조작할 때 |
-| ③ 명령줄 스크립트 | 정해진 시나리오를 빠르게 넣을 때 |
+| ① GUI 시연 콘솔 (PC) | 시연 전체. 고장 · 타이어 · 주행 환경 · 음성 질문을 한 화면에서 조작하고 앱의 판정까지 로그로 봅니다 |
+| ② 명령줄 스크립트 | 정해진 경고등 시나리오를 빠르게 넣을 때 |
 
-### ① 앱 안의 DEMO 패널
-
-![DEMO 패널](docs/screenshots/E_demo_panel.png)
-
-1. 앱 상단의 **DEMO** 를 누르면 오른쪽 아래에 패널이 열립니다. "가상 콘솔 연결됨"이 뜰 때까지 1~2초 기다립니다.
-2. **FAULT INJECTION** 에서 스위치를 눌러 고장을 켜고 끕니다. 여러 개를 동시에 켤 수 있고 "모두 해제"로 한 번에 끕니다.
-3. **LIVE MONITOR** 에 과정이 최신순으로 쌓입니다.
-
-| 표시 | 의미 |
-|---|---|
-| 주입 | 가상 콘솔에 보낸 요청과 수락 여부 |
-| 신호 | SDK로 실제 읽힌 변화. "주입 후 0.3초"처럼 걸린 시간이 붙습니다 |
-| 판정 | 엔진이 내린 등급과 근거 |
-| 환경 | 낮/밤, 날씨, 도로 조건의 변화 |
-| 종합 | 운전자에게 보이는 종합 등급의 변화 |
-
-스위치의 불은 요청한 값이 아니라 **차량이 실제로 보고한 값**입니다. 신호가 SDK를 거쳐 돌아와야 불이 들어옵니다.
-DEMO 패널은 디버그 빌드에만 있습니다. 릴리스 빌드에는 DEMO 버튼도, 인터넷 권한도 없습니다.
-
-### ② GUI 시연 콘솔 (PC)
+### ① GUI 시연 콘솔 (PC)
 
 ![GUI 시연 콘솔](docs/screenshots/F_demo_console_tool.png)
 
@@ -146,20 +129,38 @@ DEMO 패널은 디버그 빌드에만 있습니다. 릴리스 빌드에는 DEMO 
 python tools/demo_console.py
 ```
 
-에뮬레이터가 켜져 있으면 자동으로 연결됩니다. `adb` 가 PATH에 없어도 Android SDK 기본 위치에서 찾습니다.
+에뮬레이터가 켜져 있으면 자동으로 연결됩니다. `adb` 는 PATH, 환경 변수 `ADB`, Android SDK 기본 위치 순으로 찾습니다.
+(Claude 데스크톱 앱 안에서 SDK를 설치했다면 SDK가 `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Local\Android\Sdk` 로 가상화되는데, 이 위치도 찾습니다.)
 
 | 영역 | 내용 |
 |---|---|
 | **SCENARIOS** | 누르면 기존 고장을 지우고 시나리오를 주입합니다. 오른쪽 링의 숫자는 앱에서 기대되는 등급입니다 |
-| **FAULT INJECTION** | 고장을 하나씩 켜고 끕니다. 불이 켜진 항목은 차량이 실제로 보고하는 상태입니다 |
+| **FAULT INJECTION** | 경고등 고장과 와이퍼를 하나씩 켜고 끕니다. 불이 켜진 항목은 차량이 실제로 보고하는 상태입니다 |
 | **OTHER TELLTALES** | 목록에 없는 경고등을 종류·색·상태(On / Blink / Off)를 골라 넣습니다 |
 | **VEHICLE STATE** | 지금 켜져 있는 경고등과 앞 와이퍼 상태 |
-| **LIVE LOG** | 주입 요청과 차량이 보고한 변화 |
+| **APP · TIRE PRESSURE** | 바퀴별 저압 시연값(120kPa). v2.1 에뮬레이터에는 실측 공기압이 없어서 앱 안에서 만듭니다. 앱 화면과 리포트에 "시연값"으로 표시됩니다 |
+| **APP · DRIVING CONTEXT** | 주행/정차, 밤/낮, 비·눈/맑음은 누를 때마다 자동 → 강제 ON → 강제 OFF. 고속도로·50km 이상은 켬/끔. **시연 환경 고정**은 낮·맑음으로 고정해 실시간 날씨나 시각 때문에 등급이 바뀌지 않게 합니다 |
+| **APP · VOICE** | 음성 질문 4개. 에뮬레이터에는 마이크 입력이 없어서 버튼으로 보내며, 앱은 실제 음성과 같은 경로로 화면과 음성으로 답합니다 |
+| **LIVE LOG** | 도구가 보낸 요청, 차량이 보고한 변화, 앱의 판정(`[앱]`, logcat 태그 `CarDoctorLog`)을 시간순으로 |
 | **앱 실행 / 화면 캡처** | 캡처는 `captures/` 폴더에 시각이 붙은 PNG로 저장됩니다 |
 
-낮/밤과 도로 조건은 차량 신호가 아니라 앱 안의 설정이므로 앱 화면의 칩으로 바꿉니다.
+"모두 해제"는 경고등 · 와이퍼와 함께 타이어 시연값도 지웁니다.
 
-### ③ 명령줄 스크립트
+명령을 직접 보낼 수도 있습니다.
+
+```
+adb shell am broadcast --user current -n com.cardoctor.demo/.demo.DemoCommandReceiver -a com.cardoctor.demo.DEMO --es cmd tire --es wheel RIGHT_REAR --ez low true
+```
+
+| cmd | 추가 값 |
+|---|---|
+| `tire` | `wheel` = LEFT_FRONT · RIGHT_FRONT · LEFT_REAR · RIGHT_REAR, `low` = true/false |
+| `tires_clear` | 없음 |
+| `env` | `key` = driving · night · weather (`value` = auto/on/off), highway · long (`value` = on/off) |
+| `env_lock` / `env_reset` | 없음 (낮·맑음 고정 / 모두 자동) |
+| `ask` | `q` = 0~3 (지금 정비소 가야 돼? · 왜 위험해? · 정비소 안내해줘 · 리포트 보여줘) |
+
+### ② 명령줄 스크립트
 
 Windows `cmd` · PowerShell 에서는 `scripts\demo.cmd`, Git Bash · macOS · Linux 에서는 `scripts/demo.sh` 를 씁니다. 인자는 같습니다.
 
@@ -186,7 +187,7 @@ scripts\demo.cmd headlamp
 
 1. 정상 상태에서 시작합니다. 종합 판정 "정상", 조명은 청록색입니다.
 2. **전조등 이상**을 주입합니다. 낮이라 1등급 "여유 있게 정비"가 나옵니다.
-3. 앱의 **낮** 칩을 눌러 **밤**으로 바꿉니다. 같은 고장이 야간 가중치 +3을 받아 3등급 "즉시 정비"로 올라갑니다.
+3. 시연 콘솔의 **밤/낮** 버튼(또는 앱의 **낮** 칩)을 눌러 **밤**으로 바꿉니다. 같은 고장이 야간 가중치 +3을 받아 3등급 "즉시 정비"로 올라갑니다.
 4. 칩을 두 번 더 눌러 자동으로 되돌리고, **빗길 타이어**를 주입합니다. 와이퍼가 작동해 비로 판단되고 3등급이 됩니다.
 5. **브레이크 + ABS**를 주입합니다. 환경과 관계없이 4등급 "즉시 정차"가 나오고 화면이 점멸합니다.
 6. **모두 해제**로 정상으로 돌아옵니다.
@@ -219,12 +220,11 @@ Pleos Vehicle SDK ──▶ PleosSignalSource ──▶ FaultDetector ──▶ 
 app/src/main/java/com/cardoctor/demo/
 ├── engine/        판정 엔진 (순수 Kotlin, Android 의존성 없음): Model, Rules, SeverityEngine
 ├── vehicle/       Pleos Vehicle SDK로 신호 읽기: PleosSignalSource
-├── demo/          가상 콘솔 연동과 모니터 기록: DemoConsole
-├── ui/            화면: DashboardScreen, Car3DView, CarDiagram, DemoPanel, Palette
+├── demo/          PC 시연 도구가 보내는 명령 수신: DemoCommandReceiver
+├── ui/            화면: DashboardScreen, AssistCards, Car3DView, CarDiagram, Palette
 ├── MainViewModel  신호 → 환경 → 판정을 묶어 화면 상태로 만듦
 └── MainActivity
 app/src/main/assets/car3d/   3D 뷰어 (three.js, 차량 모델)
-app/src/debug/               디버그 빌드 전용 설정 (DEMO 패널의 네트워크 접근)
 app/src/test/                판정 엔진 단위 테스트
 tools/demo_console.py        GUI 시연 콘솔
 scripts/demo.cmd, demo.sh    명령줄 시나리오 주입
@@ -254,11 +254,11 @@ WebGL이나 모델을 불러올 수 없는 환경에서는 2D 평면도(`ui/CarD
 ## 알려진 제약
 
 - 경고등 읽기(`Safety.getTelltalesInfo`)는 비공개 권한 `PRIVATE_CAR_SAFETY`가 필요합니다. 권한이 없으면 앱은 **공개 신호 모드**로 바뀌어 타이어·구동 배터리·전조등·와이퍼·기어 신호로 계속 진단합니다. 신호별 권한과 에뮬레이터 상태는 [docs/SIGNAL_MAP.md](docs/SIGNAL_MAP.md)에 정리했습니다.
-- 타이어 실측 공기압(`TIRE_PRESSURE`)은 v2.1 에뮬레이터에 없습니다. 실차에서 값이 오면 바퀴별로 판정하고, 없으면 "센서값 없음"과 TPMS 경고등으로 판정합니다. 바퀴별 시연은 DEMO 패널의 시연값으로 하며, 시연값 판정에는 화면과 리포트에 "시연값"이 표시됩니다.
+- 타이어 실측 공기압(`TIRE_PRESSURE`)은 v2.1 에뮬레이터에 없습니다. 실차에서 값이 오면 바퀴별로 판정하고, 없으면 "센서값 없음"과 TPMS 경고등으로 판정합니다. 바퀴별 시연은 GUI 시연 콘솔의 타이어 시연값으로 하며, 시연값 판정에는 화면과 리포트에 "시연값"이 표시됩니다.
 - 전조등·와이퍼의 실제 고장은 에뮬레이터에서 재현할 수 없어, 전조등 고장은 LED 헤드램프 경고등으로 표현합니다.
 - 고장 주입은 에뮬레이터의 Virtual Console에 의존합니다. 실차에는 이 콘솔이 없습니다.
 - 도로 종류와 남은 거리는 아직 차량 신호와 연결하지 않아 칩으로 바꿉니다.
-- 에뮬레이터에는 마이크 입력이 없어 음성 질문은 DEMO 패널 버튼으로 시연합니다. 버튼은 실제 음성과 같은 해석·답변 경로를 탑니다.
+- 에뮬레이터에는 마이크 입력이 없어 음성 질문은 GUI 시연 콘솔의 질문 버튼으로 시연합니다. 버튼은 실제 음성과 같은 해석·답변 경로를 탑니다.
 - 에뮬레이터 기준으로만 검증했습니다.
 
 ## 운전 중 안전 (화면 잠금 · 음성)
@@ -278,9 +278,9 @@ WebGL이나 모델을 불러올 수 없는 환경에서는 2D 평면도(`ui/CarD
 
 ## 시연 안정성
 
-- **시연 환경 고정 (낮·맑음)**: DEMO 패널 버튼 하나로 밤·날씨를 강제로 고정하고 고속도로·장거리를 끕니다. 실시간 날씨나 시각 때문에 시연 중 등급이 바뀌지 않습니다.
+- **시연 환경 고정 (낮·맑음)**: GUI 시연 콘솔 버튼 하나로 밤·날씨를 강제로 고정하고 고속도로·장거리를 끕니다. 실시간 날씨나 시각 때문에 시연 중 등급이 바뀌지 않습니다.
 - 고장이 없어도 OVERALL 카드의 **정비소 리포트 · QR** 로 바로 들어갈 수 있습니다.
-- DEMO 패널을 열면 3D 차량 자리에 패널이 들어가 고장 카드는 가려지지 않습니다.
+- 앱에는 시연용 화면이 없습니다. 고장 주입과 시연값은 모두 PC의 GUI 시연 콘솔에서 합니다.
 
 ## 보안 (API 키)
 

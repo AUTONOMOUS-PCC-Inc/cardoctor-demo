@@ -7,12 +7,12 @@
 
 | 앱 기능 | 실차 신호 (VHAL 속성) | SDK API | 권한 | 공개 여부 | 에뮬레이터 | 시연 방법 |
 |---|---|---|---|---|---|---|
-| 경고등 기반 고장 판정 (브레이크·ABS·에어백·과열·배터리·조향·TPMS·헤드램프) | `TELLTALES` | `Safety.getTelltalesInfo` | `PRIVATE_CAR_SAFETY` | **비공개** | 실제 신호 | Virtual Console `/vehicle/telltales/simulator` (DEMO 패널 FAULT INJECTION) |
+| 경고등 기반 고장 판정 (브레이크·ABS·에어백·과열·배터리·조향·TPMS·헤드램프) | `TELLTALES` | `Safety.getTelltalesInfo` | `PRIVATE_CAR_SAFETY` | **비공개** | 실제 신호 | Virtual Console `/vehicle/telltales/simulator` (GUI 시연 콘솔 FAULT INJECTION) |
 | 야간 전조등 꺼짐 (`night_lights_off`) | `LOW_BEAM_LIGHTS_SWITCH`, `LOW_BEAM_LIGHTS_STATE` | `Light.getLowBeamLightSwitch` / `getCurrentLowBeamLightState` | `CAR_LIGHTS` | 공개 | 실제 신호 | 밤 칩 + 주행 칩, 전조등 스위치 OFF |
-| 비·눈 판단 (와이퍼) | `WINDSHIELD_WIPERS_SWITCH`, `WINDSHIELD_WIPERS_STATE` | `Wiper.getCurrentWiperSwitch` / `getCurrentWiperState` | `READ_WINDSHIELD_WIPERS` | 공개 | 실제 신호 | DEMO 패널 "와이퍼 작동(비)" |
-| 주행 중 판단 (화면 잠금, 음성 우선) | `GEAR_SELECTION` (VENDOR) | `Gear.getCurrentGearSelectionState` | `CAR_DRIVE` | 공개 | 실제 신호 (P) | 상단 "정차/주행 중" 칩으로 강제 |
+| 비·눈 판단 (와이퍼) | `WINDSHIELD_WIPERS_SWITCH`, `WINDSHIELD_WIPERS_STATE` | `Wiper.getCurrentWiperSwitch` / `getCurrentWiperState` | `READ_WINDSHIELD_WIPERS` | 공개 | 실제 신호 | GUI 시연 콘솔 "와이퍼 작동 (비)" |
+| 주행 중 판단 (화면 잠금, 음성 우선) | `GEAR_SELECTION` (VENDOR) | `Gear.getCurrentGearSelectionState` | `CAR_DRIVE` | 공개 | 실제 신호 (P) | 앱 상단 "정차/주행 중" 칩 또는 GUI 시연 콘솔 DRIVING CONTEXT로 강제 |
 | 구동 배터리 부족 (`low_ev_battery`, 15% 미만) | `EV_BATTERY_LEVEL`, `INFO_EV_BATTERY_CAPACITY` | `EvBattery.getEvBatteryLevel` / `getEvBatteryCapacity` | `CAR_ENERGY`, `CAR_INFO` | 공개 | 실제 신호 (77.4kWh / 100%) | 에뮬레이터 값 변경 시 자동 반영 |
-| 바퀴별 타이어 공기압 (F1) | `TIRE_PRESSURE`, `CRITICALLY_LOW_TIRE_PRESSURE` | `Tire.getTirePressure` / `getLowTirePressure` | `CAR_SAFETY` | 공개 | **속성 없음** ("not in carPropertyConfig") | DEMO 패널 TIRE PRESSURE 시연값 (화면에 "시연값" 표시) |
+| 바퀴별 타이어 공기압 (F1) | `TIRE_PRESSURE`, `CRITICALLY_LOW_TIRE_PRESSURE` | `Tire.getTirePressure` / `getLowTirePressure` | `CAR_SAFETY` | 공개 | **속성 없음** ("not in carPropertyConfig") | GUI 시연 콘솔 APP · TIRE PRESSURE 시연값 (adb 브로드캐스트) (화면에 "시연값" 표시) |
 
 ## 2. 주행 환경
 
@@ -28,7 +28,7 @@
 | 기능 | SDK / API | 권한 | 에뮬레이터 |
 |---|---|---|---|
 | 음성 경고 (F3) | Pleos TextToSpeech 3.3.1, `ON_DEVICE` + `ko_KR` | `TTS_SERVICE` | 동작 |
-| 음성 질문 | Pleos SpeechToText 3.3.1, `ON_DEVICE` + `ko_KR` | `STT_SERVICE`, `RECORD_AUDIO` | 엔진 연결·요청 동작. 에뮬레이터는 마이크 입력이 없어 DEMO 패널 질문 버튼으로 같은 처리 경로를 시연 |
+| 음성 질문 | Pleos SpeechToText 3.3.1, `ON_DEVICE` + `ko_KR` | `STT_SERVICE`, `RECORD_AUDIO` | 엔진 연결·요청 동작. 에뮬레이터는 마이크 입력이 없어 GUI 시연 콘솔 질문 버튼(adb 브로드캐스트)으로 같은 처리 경로를 시연 |
 | 길안내 (F4) | Pleos NaviHelper 3.0.5 `requestRoute` | `NAVI_ROUTE` | 동작 (GPS를 판교로 고정) |
 | 위치 | Pleos FusedLocation 1.1.3 | `FUSED_LOCATION`, `ACCESS_FINE_LOCATION` | 동작 |
 | 정비소·주차장 검색 | Tmap POI | 앱 키 | 동작 |

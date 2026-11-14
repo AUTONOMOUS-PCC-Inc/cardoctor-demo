@@ -36,10 +36,6 @@ class MainActivity : ComponentActivity() {
             onCycleWeather = viewModel::cycleWeather,
             onToggleHighway = viewModel::toggleHighway,
             onToggleLongDistance = viewModel::toggleLongDistance,
-            onToggleDemo = viewModel::toggleDemo,
-            onInject = viewModel::inject,
-            onClearAllFaults = viewModel::clearAllFaults,
-            onToggleDemoTire = viewModel::toggleDemoTire,
             onOpenDetail = viewModel::openDetail,
             onStartGuidance = viewModel::startGuidance,
             onOpenReport = viewModel::openReport,
@@ -47,9 +43,7 @@ class MainActivity : ComponentActivity() {
             reportJson = viewModel::reportJson,
             onCycleDriving = viewModel::cycleDriving,
             onListen = viewModel::listen,
-            onAsk = viewModel::answer,
-            onDismissVoice = viewModel::dismissVoice,
-            onLockDemoEnvironment = viewModel::lockDemoEnvironment
+            onDismissVoice = viewModel::dismissVoice
         )
         setContent {
             val state by viewModel.uiState.collectAsStateWithLifecycle()

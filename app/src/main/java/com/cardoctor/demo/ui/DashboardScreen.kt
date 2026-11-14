@@ -48,7 +48,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cardoctor.demo.Override
 import com.cardoctor.demo.UiState
-import com.cardoctor.demo.demo.DemoFault
 import com.cardoctor.demo.engine.CarPart
 import com.cardoctor.demo.engine.Diagnosis
 import com.cardoctor.demo.engine.Environment
@@ -62,10 +61,6 @@ class DashboardActions(
     val onCycleWeather: () -> Unit,
     val onToggleHighway: () -> Unit,
     val onToggleLongDistance: () -> Unit,
-    val onToggleDemo: () -> Unit,
-    val onInject: (DemoFault, Boolean) -> Unit,
-    val onClearAllFaults: () -> Unit,
-    val onToggleDemoTire: (Wheel) -> Unit,
     val onOpenDetail: (String?) -> Unit,
     val onStartGuidance: (Place) -> Unit,
     val onOpenReport: (Boolean) -> Unit,
@@ -73,9 +68,7 @@ class DashboardActions(
     val reportJson: (UiState) -> String,
     val onCycleDriving: () -> Unit,
     val onListen: () -> Unit,
-    val onAsk: (String) -> Unit,
-    val onDismissVoice: () -> Unit,
-    val onLockDemoEnvironment: () -> Unit
+    val onDismissVoice: () -> Unit
 )
 
 @Composable
@@ -84,9 +77,6 @@ fun DashboardScreen(state: UiState, actions: DashboardActions) {
     val onCycleWeather = actions.onCycleWeather
     val onToggleHighway = actions.onToggleHighway
     val onToggleLongDistance = actions.onToggleLongDistance
-    val onToggleDemo = actions.onToggleDemo
-    val onInject = actions.onInject
-    val onClearAllFaults = actions.onClearAllFaults
     val grade = state.report.overallGrade
     val waiting = state.snapshot.telltales == null
     // The room light follows the overall state and fades between colours.
@@ -138,12 +128,7 @@ fun DashboardScreen(state: UiState, actions: DashboardActions) {
             Spacer(Modifier.height(28.dp))
 
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(44.dp)) {
-                // The demo console takes the car's place so the fault cards stay fully visible.
-                if (state.demo.open) {
-                    DemoPanel(state, actions, Modifier.weight(0.72f).fillMaxHeight())
-                } else {
-                    VehiclePanel(state, ambient, Modifier.weight(0.72f).fillMaxHeight())
-                }
+                VehiclePanel(state, ambient, Modifier.weight(0.72f).fillMaxHeight())
                 Column(
                     Modifier.weight(1.28f).fillMaxHeight(),
                     verticalArrangement = Arrangement.spacedBy(24.dp)
@@ -180,7 +165,6 @@ private fun TopBar(state: UiState, actions: DashboardActions) {
     val onCycleWeather = actions.onCycleWeather
     val onToggleHighway = actions.onToggleHighway
     val onToggleLongDistance = actions.onToggleLongDistance
-    val onToggleDemo = actions.onToggleDemo
     val env = state.environment
     val controls = state.controls
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -193,24 +177,6 @@ private fun TopBar(state: UiState, actions: DashboardActions) {
             Text("지금 정비소에 가야 할까요", style = Type.body(22, Palette.TextSecondary))
         }
         Spacer(Modifier.weight(1f))
-        if (state.demo.available) {
-            // Debug builds: the label gives way to the demo console switch.
-            val shape = RoundedCornerShape(24.dp)
-            val on = state.demo.open
-            Box(
-                Modifier
-                    .clip(shape)
-                    .background(if (on) Palette.Accent.copy(alpha = 0.2f) else Color.Transparent)
-                    .border(1.5.dp, if (on) Palette.Accent else Color.White.copy(alpha = 0.2f), shape)
-                    .clickable(onClick = onToggleDemo)
-                    .padding(horizontal = 20.dp, vertical = 12.dp)
-            ) {
-                Text("DEMO", style = Type.Eyebrow.copy(fontSize = 15.sp, color = if (on) Palette.Accent else Palette.TextSecondary))
-            }
-        } else {
-            Text("DRIVING CONTEXT", style = Type.Eyebrow.copy(fontSize = 16.sp))
-        }
-        Spacer(Modifier.width(18.dp))
         MicButton(state.assist.voice.listening, actions.onListen)
         Spacer(Modifier.width(18.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

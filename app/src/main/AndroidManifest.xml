@@ -49,6 +49,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Demo control from the PC tool over adb. DUMP is held by the adb shell, not by apps. -->
+        <receiver
+            android:name=".demo.DemoCommandReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="com.cardoctor.demo.DEMO" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>
