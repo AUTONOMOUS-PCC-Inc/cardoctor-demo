@@ -32,7 +32,7 @@
 | 길안내 (F4) | Pleos NaviHelper 3.0.5 `requestRoute` | `NAVI_ROUTE` | 동작 (GPS를 판교로 고정) |
 | 위치 | Pleos FusedLocation 1.1.3 | `FUSED_LOCATION`, `ACCESS_FINE_LOCATION` | 동작 |
 | 정비소·주차장 검색 | Tmap POI | 앱 키 | 동작 |
-| AI 설명 (F6) | Gemini | API 키 (Android 앱 제한) | 동작. 실패 시 규칙표 문구 |
+| AI 설명 (F6) | Gemini | API 키 (Gemini API 전용 · 무료 등급 · 하루 300건) | 동작. 실패 시 규칙표 문구 |
 
 ## 4. `PRIVATE_CAR_SAFETY`를 못 받을 때 (공개 신호 모드)
 

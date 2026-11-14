@@ -285,7 +285,11 @@ WebGL이나 모델을 불러올 수 없는 환경에서는 2D 평면도(`ui/CarD
 ## 보안 (API 키)
 
 - 키는 `local.properties`(git 제외)에만 두고 빌드 때 `BuildConfig`로 들어갑니다. 저장소에는 키가 없습니다.
-- **Gemini**: 요청마다 `X-Android-Package`와 `X-Android-Cert`(서명 SHA-1)를 보냅니다. Google Cloud 콘솔에서 키를 "Android 앱"으로 제한하고 패키지 `com.cardoctor.demo`와 서명 SHA-1을 등록하면, APK에서 키를 꺼내도 다른 곳에서는 쓸 수 없습니다. API 제한도 Generative Language API 하나로 둡니다.
+- **Gemini**: Gemini용 키는 구글 정책상 서비스 계정에 바인드되어 "Android 앱" 제한을 걸 수 없습니다. 대신 세 겹으로 피해 범위를 막았습니다.
+  - API 제한: 이 키로는 Gemini API만 호출됩니다.
+  - 무료 등급: 결제 수단이 없어 키가 새도 요금이 청구되지 않습니다.
+  - 하루 상한: 앱이 쓰는 `gemini-3.5-flash-lite`를 프로젝트당 하루 300건으로 낮췄습니다. 넘으면 앱은 규칙표 문구로 설명합니다.
+  - 앱은 요청에 `X-Android-Package` · `X-Android-Cert`를 함께 보내므로, 일반 API 키로 바꾸면 Android 앱 제한을 바로 쓸 수 있습니다.
 - **Tmap**: SK open API 콘솔에서 일일 호출 한도를 낮게 두고, POI 검색 API만 켭니다. 앱은 1km 이상 이동했을 때만 다시 검색합니다.
 - 실서비스라면 두 호출을 서버 프록시로 옮기고 앱에는 키를 넣지 않습니다.
 
