@@ -1,8 +1,12 @@
 package com.cardoctor.demo.vehicle
 
 import ai.pleos.playground.vehicle.Vehicle
+import ai.pleos.playground.vehicle.api.model.area.WheelArea
 import ai.pleos.playground.vehicle.api.model.area.WindowArea
+import ai.pleos.playground.vehicle.constant.area.WheelValue
 import ai.pleos.playground.vehicle.constant.area.WindowValue
+import com.cardoctor.demo.engine.TireReading
+import com.cardoctor.demo.engine.Wheel
 import ai.pleos.playground.vehicle.constant.control.LightState
 import ai.pleos.playground.vehicle.constant.control.LightSwitch
 import ai.pleos.playground.vehicle.constant.control.WiperState
@@ -107,7 +111,61 @@ class PleosSignalSource(context: Context) {
                 { report("와이퍼", it) }
             )
         }
+
+        refreshTires()
     }
+
+    private companion object {
+        val WHEELS = listOf(
+            Wheel.LEFT_FRONT to WheelValue.LEFT_FRONT,
+            Wheel.RIGHT_FRONT to WheelValue.RIGHT_FRONT,
+            Wheel.LEFT_REAR to WheelValue.LEFT_REAR,
+            Wheel.RIGHT_REAR to WheelValue.RIGHT_REAR
+        )
+    }
+
+    /**
+     * F1: per-wheel pressure and low-pressure threshold. The v2.1 emulator has no TIRE_PRESSURE
+     * property; once that is known the app stops asking and shows "센서값 없음" instead of an error.
+     */
+    private fun refreshTires() {
+        val tire = runCatching { vehicle.getTire() }.getOrNull() ?: return
+        for ((wheel, value) in WHEELS) {
+            val area = WheelArea(value)
+            if (tirePressureSupported != false) {
+                runCatching {
+                    tire.getTirePressure(
+                        area,
+                        { kpa ->
+                            if (kpa != null) {
+                                tirePressureSupported = true
+                                _snapshot.update { it.copy(tirePressure = it.tirePressure + (wheel to TireReading(kpa))) }
+                            }
+                        },
+                        { e ->
+                            // "property ID is not in carPropertyConfig list" arrives wrapped in other types.
+                            if (tirePressureSupported != true) tirePressureSupported = false
+                            android.util.Log.d("PleosSignalSource", "tire pressure: ${e.message}")
+                        }
+                    )
+                }
+            }
+            if (wheel !in _snapshot.value.tireThreshold) {
+                runCatching {
+                    tire.getLowTirePressure(
+                        area,
+                        { kpa -> if (kpa != null) _snapshot.update { it.copy(tireThreshold = it.tireThreshold + (wheel to kpa)) } },
+                        { }
+                    )
+                }
+            }
+        }
+    }
+
+    /** null = not asked yet, false = the vehicle has no tire pressure sensor values. */
+    @Volatile
+    var tirePressureSupported: Boolean? = null
+        private set
 
     private inline fun call(signal: String, block: () -> Unit) {
         try {

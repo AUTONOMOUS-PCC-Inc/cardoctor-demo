@@ -36,6 +36,13 @@ object Rules {
         risk = "공기압이 낮으면 제동 거리가 길어지고, 빗길이나 고속 주행에서 미끄러지거나 파손될 수 있습니다."
     )
 
+    /** The same rule, named for one wheel when its pressure is known (F1). */
+    fun tirePressureAt(wheel: Wheel): FaultRule = TIRE_PRESSURE.copy(
+        id = "tire_pressure_${wheel.name.lowercase()}",
+        label = "${wheel.label} 타이어 공기압 저하",
+        cause = "${wheel.label} 타이어 공기압이 경고 기준보다 낮습니다."
+    )
+
     val ABS = FaultRule(
         id = "abs",
         label = "ABS 경고",

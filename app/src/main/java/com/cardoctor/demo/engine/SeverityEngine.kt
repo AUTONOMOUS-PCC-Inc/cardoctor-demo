@@ -91,8 +91,21 @@ object FaultDetector {
             }
         }
 
+        // F1: a measured pressure names the wheel; the TPMS lamp alone cannot.
+        val lowTires = snapshot.lowTires
+        lowTires.forEach { wheel ->
+            val reading = snapshot.tirePressure.getValue(wheel)
+            val simulated = if (reading.simulated) " · 시연값" else ""
+            faults += DetectedFault(
+                Rules.tirePressureAt(wheel),
+                "공기압: ${reading.kpa.toInt()}kPa < 기준 ${snapshot.thresholdOf(wheel).toInt()}kPa$simulated",
+                byType["TPMS"]?.color
+            )
+        }
+
         for ((type, rule) in Rules.BY_TELLTALE) {
             if (type == "ABS") continue
+            if (type == "TPMS" && lowTires.isNotEmpty()) continue
             byType[type]?.let { faults += fromTelltale(rule, it) }
         }
 

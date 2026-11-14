@@ -1,8 +1,18 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
+
+// API keys live in local.properties (git-ignored): TMAP_APP_KEY=..., GEMINI_API_KEY=...
+// Without them the app falls back to sample places and rule-based explanations.
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+fun secret(name: String) = "\"${localProps.getProperty(name, "")}\""
 
 android {
     namespace = "com.cardoctor.demo"
@@ -12,13 +22,18 @@ android {
         applicationId = "com.cardoctor.demo"
         minSdk = 28
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
+
+        buildConfigField("String", "TMAP_APP_KEY", secret("TMAP_APP_KEY"))
+        buildConfigField("String", "GEMINI_API_KEY", secret("GEMINI_API_KEY"))
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            // Contest APK must install on the judging emulator; the debug key is enough there.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
@@ -42,6 +57,10 @@ android {
 
 dependencies {
     implementation(libs.vehicle.sdk)
+    implementation(libs.pleos.navihelper)
+    implementation(libs.pleos.tts)
+    implementation(libs.pleos.fusedlocation)
+    implementation(libs.zxing.core)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

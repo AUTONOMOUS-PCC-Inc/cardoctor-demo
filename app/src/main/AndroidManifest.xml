@@ -8,11 +8,23 @@
     <uses-permission android:name="pleos.car.permission.CAR_WINDOWS" />
 
     <!--
-        Safety.getTelltalesInfo() fails with SecurityException without this one.
+        Safety.getTelltalesInfo() and the Tire API fail with SecurityException without this one.
         It is "normal" on the Pleos Connect v2.1 emulator image; whether third-party apps may
         use it on real vehicles is still to be confirmed with the contest organizers.
     -->
     <uses-permission android:name="pleos.car.permission.PRIVATE_CAR_SAFETY" />
+
+    <!-- F4: send a repair shop or parking lot to the car's navigation (Pleos NaviHelper). -->
+    <uses-permission android:name="pleos.car.permission.NAVI_ROUTE" />
+    <uses-permission android:name="pleos.car.permission.NAVI_ROUTE_SEARCH" />
+    <!-- F3: spoken warnings (Pleos TextToSpeech). -->
+    <uses-permission android:name="pleos.car.permission.TTS_SERVICE" />
+    <!-- F4/F7: position for nearby places and local weather. -->
+    <uses-permission android:name="pleos.car.permission.FUSED_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- F4 Tmap, F6 Gemini, F7 Open-Meteo. -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:allowBackup="false"

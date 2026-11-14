@@ -40,14 +40,37 @@ data class TelltaleSignal(
     val color: LampColor = LampColor.UNKNOWN
 )
 
+/** The four wheels, in the order the tire tiles are drawn. */
+enum class Wheel(val label: String) {
+    LEFT_FRONT("앞 왼쪽"), RIGHT_FRONT("앞 오른쪽"), LEFT_REAR("뒤 왼쪽"), RIGHT_REAR("뒤 오른쪽")
+}
+
+/** One wheel's tire pressure in kPa, and whether it came from the demo panel instead of a sensor. */
+data class TireReading(val kpa: Float, val simulated: Boolean = false)
+
 /** Everything the app reads from the vehicle in one refresh. Null = not available. */
 data class VehicleSnapshot(
     val telltales: List<TelltaleSignal>? = null,
     val lowBeamSwitchOn: Boolean? = null,
     val lowBeamStateOn: Boolean? = null,
     val wiperSwitchOn: Boolean? = null,
-    val wiperStateOn: Boolean? = null
-)
+    val wiperStateOn: Boolean? = null,
+    /** Per-wheel pressure. Missing wheel = no sensor value (the v2.1 emulator has none). */
+    val tirePressure: Map<Wheel, TireReading> = emptyMap(),
+    /** Per-wheel low-pressure threshold (CRITICALLY_LOW_TIRE_PRESSURE), kPa. */
+    val tireThreshold: Map<Wheel, Float> = emptyMap()
+) {
+    /** Threshold to judge a wheel against: the vehicle's own value, else a typical passenger-car one. */
+    fun thresholdOf(wheel: Wheel): Float = tireThreshold[wheel] ?: DEFAULT_LOW_TIRE_KPA
+
+    /** Wheels whose known pressure is below their threshold. */
+    val lowTires: List<Wheel>
+        get() = Wheel.entries.filter { w -> tirePressure[w]?.let { it.kpa < thresholdOf(w) } == true }
+
+    companion object {
+        const val DEFAULT_LOW_TIRE_KPA = 137f
+    }
+}
 
 data class Environment(
     val night: Boolean = false,

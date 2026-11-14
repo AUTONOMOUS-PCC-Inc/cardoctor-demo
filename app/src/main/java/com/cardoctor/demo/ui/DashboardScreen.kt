@@ -53,18 +53,35 @@ import com.cardoctor.demo.engine.CarPart
 import com.cardoctor.demo.engine.Diagnosis
 import com.cardoctor.demo.engine.Environment
 import com.cardoctor.demo.engine.Grades
+import com.cardoctor.demo.engine.Wheel
+import com.cardoctor.demo.services.Place
+
+/** Everything the dashboard can ask the view model to do. */
+class DashboardActions(
+    val onCycleNight: () -> Unit,
+    val onCycleWeather: () -> Unit,
+    val onToggleHighway: () -> Unit,
+    val onToggleLongDistance: () -> Unit,
+    val onToggleDemo: () -> Unit,
+    val onInject: (DemoFault, Boolean) -> Unit,
+    val onClearAllFaults: () -> Unit,
+    val onToggleDemoTire: (Wheel) -> Unit,
+    val onOpenDetail: (String?) -> Unit,
+    val onStartGuidance: (Place) -> Unit,
+    val onOpenReport: (Boolean) -> Unit,
+    val onExportReport: () -> Unit,
+    val reportJson: (UiState) -> String
+)
 
 @Composable
-fun DashboardScreen(
-    state: UiState,
-    onCycleNight: () -> Unit,
-    onCycleWeather: () -> Unit,
-    onToggleHighway: () -> Unit,
-    onToggleLongDistance: () -> Unit,
-    onToggleDemo: () -> Unit,
-    onInject: (DemoFault, Boolean) -> Unit,
-    onClearAllFaults: () -> Unit
-) {
+fun DashboardScreen(state: UiState, actions: DashboardActions) {
+    val onCycleNight = actions.onCycleNight
+    val onCycleWeather = actions.onCycleWeather
+    val onToggleHighway = actions.onToggleHighway
+    val onToggleLongDistance = actions.onToggleLongDistance
+    val onToggleDemo = actions.onToggleDemo
+    val onInject = actions.onInject
+    val onClearAllFaults = actions.onClearAllFaults
     val grade = state.report.overallGrade
     val waiting = state.snapshot.telltales == null
     // The room light follows the overall state and fades between colours.
@@ -122,15 +139,26 @@ fun DashboardScreen(
                     verticalArrangement = Arrangement.spacedBy(24.dp)
                 ) {
                     OverallCard(grade, waiting, ambient)
-                    FaultList(state, Modifier.weight(1f))
+                    if (state.report.diagnoses.isNotEmpty()) {
+                        GuidanceCard(state, actions.onStartGuidance, { actions.onOpenReport(true) })
+                    }
+                    FaultList(state, actions.onOpenDetail, Modifier.weight(1f))
                     if (state.demo.open) {
-                        DemoPanel(state, onInject, onClearAllFaults, Modifier.height(330.dp))
+                        DemoPanel(state, onInject, onClearAllFaults, actions.onToggleDemoTire, Modifier.height(480.dp))
                     }
                 }
             }
 
             Spacer(Modifier.height(20.dp))
             Footer(state)
+        }
+
+        // F2 자세히보기 and F5 리포트 sit above the dashboard.
+        state.report.diagnoses.firstOrNull { it.rule.id == state.assist.detailId }?.let { d ->
+            DetailOverlay(state, d) { actions.onOpenDetail(null) }
+        }
+        if (state.assist.reportOpen) {
+            ReportOverlay(state, actions.reportJson(state), actions.onExportReport) { actions.onOpenReport(false) }
         }
     }
 }
@@ -184,7 +212,12 @@ private fun TopBar(
             )
             EnvChip(
                 text = if (env.badWeather) "비·눈" else "맑음",
-                detail = if (controls.weather == Override.AUTO) "와이퍼 신호" else controls.weather.suffix,
+                detail = when {
+                    controls.weather != Override.AUTO -> controls.weather.suffix
+                    state.snapshot.wiperSwitchOn == true -> "와이퍼 신호"
+                    state.assist.weather != null -> "날씨 API · ${state.assist.weather.label}"
+                    else -> "와이퍼 신호"
+                },
                 active = env.badWeather,
                 forced = controls.weather != Override.AUTO,
                 onClick = onCycleWeather
@@ -266,6 +299,8 @@ private fun VehiclePanel(state: UiState, ambient: Color, modifier: Modifier) {
             ),
             modifier = Modifier.align(Alignment.CenterHorizontally)
         )
+        Spacer(Modifier.height(18.dp))
+        ChassisCard(state)
     }
 }
 
@@ -385,10 +420,12 @@ private fun GradeDial(grade: Int, waiting: Boolean, color: Color) {
 }
 
 @Composable
-private fun FaultList(state: UiState, modifier: Modifier) {
+private fun FaultList(state: UiState, onOpenDetail: (String?) -> Unit, modifier: Modifier) {
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(20.dp)) {
         items(state.report.notices) { NoticeCard(it) }
-        items(state.report.diagnoses, key = { it.rule.id }) { FaultCard(it, state.environment) }
+        items(state.report.diagnoses, key = { it.rule.id }) { d ->
+            FaultCard(d, state.explanationOf(d).summary) { onOpenDetail(d.rule.id) }
+        }
     }
 }
 
@@ -404,8 +441,12 @@ private fun NoticeCard(text: String) {
     }
 }
 
+/**
+ * F2: readable while driving. One large summary line, the grade, the evidence chips and the action;
+ * the cause/risk text lives behind "자세히보기".
+ */
 @Composable
-private fun FaultCard(diagnosis: Diagnosis, environment: Environment) {
+private fun FaultCard(diagnosis: Diagnosis, summary: String, onDetail: () -> Unit) {
     val color = Palette.grade(diagnosis.grade)
     Row(Modifier.fillMaxWidth().glass(28.dp).height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
         // Grade-coloured edge light.
@@ -414,36 +455,23 @@ private fun FaultCard(diagnosis: Diagnosis, environment: Environment) {
                 .background(Brush.verticalGradient(listOf(color, color.copy(alpha = 0.25f))))
         )
         Column(
-            Modifier.padding(horizontal = 36.dp, vertical = 30.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+            Modifier.weight(1f).padding(start = 36.dp, end = 20.dp, top = 26.dp, bottom = 26.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(diagnosis.rule.label, style = Type.title(38))
                 Spacer(Modifier.width(22.dp))
-                Box(
-                    Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(color.copy(alpha = 0.16f))
-                        .border(1.5.dp, color, RoundedCornerShape(20.dp))
-                        .padding(horizontal = 18.dp, vertical = 6.dp)
-                ) {
-                    Text(
-                        "${diagnosis.grade}등급 · ${Grades.title(diagnosis.grade)}",
-                        style = Type.title(22).copy(color = color)
-                    )
-                }
-                Spacer(Modifier.weight(1f))
-                Text(diagnosis.fault.source, style = Type.body(20, Palette.TextTertiary))
+                GradeBadge(diagnosis.grade)
             }
+            Text(summary, style = Type.title(30).copy(color = Palette.TextBody), maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
 
             // Why this grade: the evidence is always visible (PRD design principle 3).
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("판정 근거", style = Type.body(20, Palette.TextSecondary))
-                Spacer(Modifier.width(4.dp))
-                ReasonChip("기본 심각도 ${diagnosis.rule.baseSeverity}", Color.White.copy(alpha = 0.22f))
+                ReasonChip("기본 ${diagnosis.rule.baseSeverity}", Color.White.copy(alpha = 0.22f))
                 diagnosis.weights.forEach {
                     Text("+", style = Type.body(22, Palette.TextTertiary))
                     ReasonChip("${it.label} ${it.points}", Palette.Accent)
@@ -454,27 +482,24 @@ private fun FaultCard(diagnosis: Diagnosis, environment: Environment) {
                     ReasonChip("안전 핵심 부품 · 최소 ${diagnosis.rule.gradeFloor}등급", Palette.Danger)
                 }
             }
-
-            Text(
-                buildString {
-                    append(diagnosis.rule.cause)
-                    append(' ')
-                    append(diagnosis.rule.risk)
-                    if (diagnosis.weights.isNotEmpty()) {
-                        append(" 지금은 ")
-                        append(diagnosis.weights.joinToString(", ") { it.label })
-                        append(" 조건이라 더 급합니다.")
-                    } else if (diagnosis.rule.gradeFloor == null && !environment.night && !environment.badWeather) {
-                        append(" 지금 주행 환경에서는 급하지 않습니다.")
-                    }
-                },
-                style = Type.body(25)
-            )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.width(28.dp).height(2.dp).background(color))
                 Spacer(Modifier.width(16.dp))
                 Text(Grades.action(diagnosis.grade), style = Type.title(27).copy(color = color))
             }
+        }
+        Box(Modifier.fillMaxHeight().padding(end = 26.dp), contentAlignment = Alignment.Center) {
+            val shape = RoundedCornerShape(22.dp)
+            Box(
+                Modifier
+                    .heightIn(min = 72.dp)
+                    .clip(shape)
+                    .background(Color.White.copy(alpha = 0.06f))
+                    .border(1.5.dp, Color.White.copy(alpha = 0.3f), shape)
+                    .clickable(onClick = onDetail)
+                    .padding(horizontal = 26.dp),
+                contentAlignment = Alignment.Center
+            ) { Text("자세히보기", style = Type.title(22)) }
         }
     }
 }
@@ -505,13 +530,18 @@ private fun Footer(state: UiState) {
                 !state.connected -> "차량 서비스에 연결하지 못했습니다"
                 state.errors.isNotEmpty() ->
                     "읽지 못한 신호: " + state.errors.entries.joinToString(", ") { "${it.key}(${it.value})" }
-                else -> "Pleos Vehicle SDK 연결됨 · 경고등 · 전조등 · 와이퍼 신호 실시간 수신"
+                else -> "Pleos Vehicle SDK 연결됨 · 경고등 · 전조등 · 와이퍼 · 타이어 신호 실시간 수신"
             },
             style = Type.body(19, Palette.TextTertiary)
         )
         Spacer(Modifier.weight(1f))
         Text(
-            "등급은 규칙으로 판정하며 안내 문구는 간략 안내입니다. 최종 판단은 정비 전문가와 상의하세요.",
+            buildList {
+                add(if (com.cardoctor.demo.services.GeminiExplainer.enabled) "AI 설명 Gemini" else "AI 설명 꺼짐")
+                add("음성 안내 3등급 이상")
+                state.assist.weather?.let { add("날씨 ${it.label}") }
+                add("등급은 규칙 엔진이 판정")
+            }.joinToString("  ·  "),
             style = Type.body(19, Palette.TextTertiary)
         )
     }

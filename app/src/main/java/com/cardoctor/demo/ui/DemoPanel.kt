@@ -53,6 +53,7 @@ fun DemoPanel(
     state: UiState,
     onInject: (DemoFault, Boolean) -> Unit,
     onClearAll: () -> Unit,
+    onToggleTire: (com.cardoctor.demo.engine.Wheel) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val lit = state.snapshot.telltales.orEmpty().map { it.type }.toSet()
@@ -86,6 +87,20 @@ fun DemoPanel(
                     }
                 }
                 InjectSwitch("모두 해제", false, Palette.Accent, onClearAll)
+            }
+            Spacer(Modifier.height(12.dp))
+            // F1: the emulator has no tire pressure values, so wheels are simulated in the app.
+            Text("TIRE PRESSURE · 시연값", style = Type.Eyebrow.copy(fontSize = 13.sp, letterSpacing = 3.sp))
+            Spacer(Modifier.height(8.dp))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                com.cardoctor.demo.engine.Wheel.entries.forEach { wheel ->
+                    InjectSwitch("${wheel.label} 저압", wheel in state.demo.lowTires, Palette.Caution) {
+                        onToggleTire(wheel)
+                    }
+                }
             }
         }
 
