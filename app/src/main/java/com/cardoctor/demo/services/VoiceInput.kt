@@ -29,25 +29,57 @@ class VoiceInput(context: Context, private val onFinal: (String) -> Unit) {
     private val _state = MutableStateFlow(VoiceState())
     val state: StateFlow<VoiceState> = _state
 
+    /**
+     * A question is open from [listen] until its answer (or timeout). The engine reports
+     * "recognition ended" just before the final sentence, so the UI's listening flag cannot be the
+     * gate; this flag is. Nothing outside an open question is acted on (e.g. our own spoken answer).
+     */
+    @Volatile private var awaiting = false
+
     private val listener = object : ResultListener {
         override fun onUpdated(text: String, isFinal: Boolean) {
-            // Only while a question is open: never act on our own spoken answer or late results.
-            if (!_state.value.listening) return
+            if (!awaiting) return
             _state.update { it.copy(transcript = text) }
-            if (isFinal && text.isNotBlank()) {
-                cancel()
-                onFinal(text)
-            }
+            if (isFinal && text.isNotBlank()) finish(text)
         }
         override fun onUpdatedEpdData(start: Long, end: Long) = Unit
         override fun onStartedRecognition() = _state.update { it.copy(listening = true) }
-        override fun onEndedRecognition() = _state.update { it.copy(listening = false) }
+        override fun onEndedRecognition() {
+            _state.update { it.copy(listening = false) }
+            // The final sentence normally follows within a moment; if it never does, use what was heard.
+            main.removeCallbacks(settle)
+            main.postDelayed(settle, SETTLE_MS)
+        }
         override fun onError(type: ErrorType) {
             Log.w(TAG, "STT error: $type")
+            if (!awaiting) return
+            awaiting = false
+            main.removeCallbacks(timeout)
+            main.removeCallbacks(settle)
             _state.update { it.copy(listening = false, reply = it.reply ?: "음성을 인식하지 못했습니다. 다시 말씀해 주세요.") }
         }
         override fun onReady() = Unit
         override fun onUpdatedRms(rms: Double) = Unit
+    }
+
+    private fun finish(text: String) {
+        if (!awaiting) return
+        awaiting = false
+        main.removeCallbacks(timeout)
+        main.removeCallbacks(settle)
+        main.post { onFinal(text) }
+    }
+
+    /** End of an open question without a final sentence: answer what was heard, or say nothing was. */
+    private fun closeWithoutFinal(message: String) {
+        if (!awaiting) return
+        val heard = _state.value.transcript
+        if (!heard.isNullOrBlank()) {
+            finish(heard)
+        } else {
+            cancel()
+            _state.update { it.copy(reply = it.reply ?: message) }
+        }
     }
 
     fun start() {
@@ -69,27 +101,26 @@ class VoiceInput(context: Context, private val onFinal: (String) -> Unit) {
     fun listen() {
         val s = stt
         if (s == null || !_state.value.available) {
-            _state.update { it.copy(listening = false, transcript = null, reply = "음성 인식에 연결되지 않았습니다. DEMO 패널의 질문 버튼을 쓰세요.") }
+            _state.update { it.copy(listening = false, transcript = null, reply = "음성 인식에 연결되지 않았습니다.") }
             return
         }
+        awaiting = true
         _state.update { it.copy(listening = true, transcript = null, reply = null) }
-        runCatching { s.request() }.onFailure { _state.update { st -> st.copy(listening = false) } }
+        runCatching { s.request() }.onFailure { awaiting = false; _state.update { st -> st.copy(listening = false) } }
         // One question per tap; the mic never stays open.
         main.removeCallbacks(timeout)
         main.postDelayed(timeout, LISTEN_TIMEOUT_MS)
     }
 
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
-    private val timeout = Runnable {
-        if (_state.value.listening) {
-            cancel()
-            _state.update { it.copy(reply = it.reply ?: "질문을 듣지 못했습니다. 마이크를 다시 눌러 주세요.") }
-        }
-    }
+    private val timeout = Runnable { closeWithoutFinal("질문을 듣지 못했습니다. 마이크를 다시 눌러 주세요.") }
+    private val settle = Runnable { closeWithoutFinal("질문을 듣지 못했습니다. 마이크를 다시 눌러 주세요.") }
 
     /** Close the microphone (before speaking an answer, on timeout, after a final result). */
     fun cancel() {
+        awaiting = false
         main.removeCallbacks(timeout)
+        main.removeCallbacks(settle)
         if (_state.value.listening) runCatching { stt?.stop() }
         _state.update { it.copy(listening = false) }
     }
@@ -106,12 +137,15 @@ class VoiceInput(context: Context, private val onFinal: (String) -> Unit) {
     }
 
     fun stop() {
+        awaiting = false
         main.removeCallbacks(timeout)
+        main.removeCallbacks(settle)
         runCatching { stt?.stop(); stt?.removeListener(listener); stt?.release() }
     }
 
     private companion object {
         const val TAG = "VoiceInput"
         const val LISTEN_TIMEOUT_MS = 8_000L
+        const val SETTLE_MS = 1_500L
     }
 }
