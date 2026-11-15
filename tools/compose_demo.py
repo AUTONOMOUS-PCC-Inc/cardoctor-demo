@@ -61,6 +61,51 @@ def ff_path(p: Path) -> str:
     return str(p).replace("\\", "/").replace(":", "\\:")
 
 
+def soften_onsets(path: Path, ramp_ms: float = 8.0, quiet: int = 60, min_gap_ms: float = 50.0) -> int:
+    """Fades in/out where sound starts or stops after silence.
+
+    The emulator records nothing while silent, so a spoken sentence starts on a hard edge and pops.
+    Returns how many edges were softened.
+    """
+    import array
+    import wave
+    with wave.open(str(path)) as w:
+        params = w.getparams()
+        data = array.array("h", w.readframes(w.getnframes()))
+    ch, rate = params.nchannels, params.framerate
+    frames = len(data) // ch
+    ramp = max(1, int(rate * ramp_ms / 1000))
+    gap = int(rate * min_gap_ms / 1000)
+    loud = [max(abs(data[i * ch + c]) for c in range(ch)) >= quiet for i in range(frames)]
+    edges = 0
+    i = 0
+    while i < frames:
+        if loud[i]:
+            i += 1
+            continue
+        j = i
+        while j < frames and not loud[j]:
+            j += 1
+        if j - i >= gap:
+            if j < frames:  # sound starts at j: ramp it in
+                for k in range(min(ramp, frames - j)):
+                    g = k / ramp
+                    for c in range(ch):
+                        data[(j + k) * ch + c] = int(data[(j + k) * ch + c] * g)
+                edges += 1
+            if i > 0:  # sound stopped at i: ramp it out
+                for k in range(min(ramp, i)):
+                    g = k / ramp
+                    for c in range(ch):
+                        data[(i - 1 - k) * ch + c] = int(data[(i - 1 - k) * ch + c] * g)
+                edges += 1
+        i = j
+    with wave.open(str(path), "wb") as w:
+        w.setparams(params)
+        w.writeframes(data.tobytes())
+    return edges
+
+
 def duration(path: Path) -> float:
     out = subprocess.run([ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
                          capture_output=True, text=True).stdout.strip()
@@ -69,8 +114,9 @@ def duration(path: Path) -> float:
 
 # The emulator's capture is low-bitrate Vorbis of an on-device TTS voice: remove clicks, lower the noise
 # floor, tame the harsh top end, then raise it by the SAME gain in every scene (it records quietly, peaks
-# near -18 dB). Per-clip loudness matching would pump up the hiss in silent scenes.
-AUDIO_FILTER = "adeclick,afftdn=nf=-30,highpass=f=90,lowpass=f=9500,volume=14dB,alimiter=limit=0.89:level=disabled"
+# near -18 dB). Per-clip loudness matching would pump up the hiss in silent scenes. adeclick at t=1 (more
+# sensitive than the default 2) is what removes the ticks inside the spoken warnings.
+AUDIO_FILTER = "adeclick=t=1,afftdn=nf=-30,highpass=f=90,lowpass=f=9500,volume=14dB,alimiter=limit=0.89:level=disabled"
 
 videos, audios = [], []
 for clip in sorted(clips.glob("scene*.webm")):
@@ -95,6 +141,8 @@ for clip in sorted(clips.glob("scene*.webm")):
         af = "anull"
     subprocess.run([ffmpeg, "-y", "-v", "error", *src, "-vn", "-af", af, "-t", length, "-ar", "48000", "-ac", "2",
                     "-c:a", "pcm_s16le", str(audio)], check=True)
+    if has_audio(clip):
+        print(f"  softened {soften_onsets(audio)} sound edges", flush=True)
     videos.append(video)
     audios.append(audio)
 
