@@ -61,24 +61,56 @@ def ff_path(p: Path) -> str:
     return str(p).replace("\\", "/").replace(":", "\\:")
 
 
-parts = []
+def duration(path: Path) -> float:
+    out = subprocess.run([ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+                         capture_output=True, text=True).stdout.strip()
+    return float(out)
+
+
+# The emulator's capture is low-bitrate Vorbis of an on-device TTS voice: remove clicks, lower the noise
+# floor, tame the harsh top end, then raise it by the SAME gain in every scene (it records quietly, peaks
+# near -18 dB). Per-clip loudness matching would pump up the hiss in silent scenes.
+AUDIO_FILTER = "adeclick,afftdn=nf=-30,highpass=f=90,lowpass=f=9500,volume=14dB,alimiter=limit=0.89:level=disabled"
+
+videos, audios = [], []
 for clip in sorted(clips.glob("scene*.webm")):
     scene = int(clip.stem.replace("scene", ""))
-    part = work / f"part{scene:02d}.mp4"
+    video = work / f"part{scene:02d}.mp4"
+    audio = work / f"part{scene:02d}.wav"
     vf = (f"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30,"
           f"subtitles='{ff_path(ass_file(scene))}':fontsdir='{ff_path(FONT_DIR)}'")
-    cmd = [ffmpeg, "-y", "-v", "error", "-i", str(clip)]
-    if not has_audio(clip):
-        cmd += ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-shortest"]
-    cmd += ["-vf", vf, "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "160k", str(part)]
     print("render", clip.name, flush=True)
-    subprocess.run(cmd, check=True)
-    parts.append(part)
+    subprocess.run([ffmpeg, "-y", "-v", "error", "-i", str(clip), "-an", "-vf", vf, "-c:v", "libx264",
+                    "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", str(video)], check=True)
+    # Audio as PCM, exactly as long as its video: each clip's sound track runs 0.1-0.3 s short, and those
+    # holes at the scene cuts are where the joined video clicked. Pad with silence, cut to length.
+    length = f"{duration(video):.3f}"
+    if has_audio(clip):
+        src = ["-i", str(clip)]
+        # Timestamps first: the emulator writes almost no audio while it is silent, so samples must be
+        # placed by their timestamps (filling silence) before any filter renumbers them.
+        af = f"aresample=async=1:first_pts=0,{AUDIO_FILTER},aresample=48000,apad"
+    else:
+        src = ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]
+        af = "anull"
+    subprocess.run([ffmpeg, "-y", "-v", "error", *src, "-vn", "-af", af, "-t", length, "-ar", "48000", "-ac", "2",
+                    "-c:a", "pcm_s16le", str(audio)], check=True)
+    videos.append(video)
+    audios.append(audio)
 
-listing = work / "parts.txt"
-listing.write_text("".join(f"file '{p.as_posix()}'\n" for p in parts), encoding="utf-8")
-subprocess.run([ffmpeg, "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy",
+
+def concat(files: list[Path], name: str) -> Path:
+    listing = work / f"{name}.txt"
+    listing.write_text("".join(f"file '{p.as_posix()}'\n" for p in files), encoding="utf-8")
+    joined = work / (name + files[0].suffix)
+    subprocess.run([ffmpeg, "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy",
+                    str(joined)], check=True)
+    return joined
+
+
+# One continuous sound track, encoded once (no AAC joins at the cuts).
+subprocess.run([ffmpeg, "-y", "-v", "error", "-i", str(concat(videos, "video")), "-i", str(concat(audios, "audio")),
+                "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "256k", "-shortest",
                 "-movflags", "+faststart", str(output)], check=True)
 dur = subprocess.run([ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(output)],
                      capture_output=True, text=True).stdout.strip()
